@@ -98,11 +98,34 @@ class BTTWDModel:
             y_bucket = y[list(idxs)]
             n_bucket = len(y_bucket)
             pos_rate = y_bucket.mean()
+
+            # 1）样本数太少：构不成桶 → 用全局回退
             if n_bucket < min_bucket_size:
                 log_info(
                     f"【BTTWD】桶 {bucket_id} 样本太少(n={n_bucket})，使用全局回退（min_bucket_size={min_bucket_size}）"
                 )
+                # 注意：这里不往 bucket_models 里放东西，让它预测时自动走全局
                 continue
+
+            # 2）单一类别桶：直接回退，不训练局部模型，避免 predict_proba 只有1列
+            unique_classes = np.unique(y_bucket)
+            if len(unique_classes) < 2:
+                log_info(
+                    f"【BTTWD】桶 {bucket_id} 仅包含单一类别 {int(unique_classes[0])} "
+                    f"(n={n_bucket})，跳过局部模型训练，使用全局回退"
+                )
+                # 你也可以顺便记一下统计信息（可选）
+                self.bucket_stats[bucket_id] = {
+                    "bucket_id": bucket_id,
+                    "n_samples": n_bucket,
+                    "pos_rate": pos_rate,
+                    "alpha": np.nan,
+                    "beta": np.nan,
+                    "train_score": np.nan,
+                }
+                continue
+
+            # 3）正常桶：训练局部模型 + 做阈值搜索
             model = self._build_bucket_estimator()
             model.fit(X_bucket, y_bucket)
             proba = model.predict_proba(X_bucket)[:, 1]
@@ -135,8 +158,10 @@ class BTTWDModel:
                 "train_score": best_score if best_score >= 0 else np.nan,
             }
             log_info(
-                f"【BTTWD】桶 {bucket_id}：n={n_bucket}, pos_rate={pos_rate:.2f}, alpha={best_alpha}, beta={best_beta}"
+                f"【BTTWD】桶 {bucket_id}：n={n_bucket}, pos_rate={pos_rate:.2f}, "
+                f"alpha={best_alpha}, beta={best_beta}"
             )
+
         log_info(
             f"【BTTWD】共生成 {bucket_ids.nunique()} 个叶子桶，其中有效桶 {len(self.bucket_models)} 个（样本数 ≥ {min_bucket_size}）"
         )
