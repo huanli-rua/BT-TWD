@@ -8,31 +8,32 @@ from .utils_logging import log_info
 
 
 def _make_writable_matrix(X):
-    """Return a writable copy of X without breaking sparse inputs."""
+    """确保特征矩阵是可写的 numpy 数组。"""
 
     if sparse.issparse(X):
-        X = X.copy()
-        if not X.data.flags.writeable:
-            X.data = np.array(X.data, copy=True)
-        return X
+        # 对于随机森林，直接转换为稠密矩阵更稳妥
+        X = X.toarray()
+    else:
+        X = np.asarray(X)
 
-    arr = np.asarray(X)
-    if arr.flags.writeable:
-        return arr
-    return np.array(arr, copy=True)
+    if not X.flags.writeable:
+        X = np.array(X, copy=True)
+    return X
 
 
 def _make_writable_vector(y):
-    """Return a writable 1D array for target labels."""
+    """确保标签向量是一维、可写的 numpy 数组。"""
 
     arr = np.asarray(y)
-    if arr.flags.writeable:
-        return arr
-    return np.array(arr, copy=True)
+    if arr.ndim != 1:
+        arr = arr.ravel()
+    if not arr.flags.writeable:
+        arr = np.array(arr, copy=True)
+    return arr
 
 
 def train_eval_logreg(X, y, cfg, cv_splitter) -> dict:
-    # Ensure writable inputs while preserving sparse matrices
+    # Ensure writable inputs for consistent downstream behavior
     X = _make_writable_matrix(X)
     y = _make_writable_vector(y)
     model_cfg = cfg.get("BASELINES", {}).get("logreg", {})
@@ -45,7 +46,7 @@ def train_eval_logreg(X, y, cfg, cv_splitter) -> dict:
 
 
 def train_eval_random_forest(X, y, cfg, cv_splitter) -> dict:
-    # Ensure writable inputs while preserving sparse matrices
+    # Ensure X, y are writable dense arrays for RandomForest
     X = _make_writable_matrix(X)
     y = _make_writable_vector(y)
     rf_cfg = cfg.get("BASELINES", {}).get("random_forest", {})
