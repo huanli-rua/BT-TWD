@@ -5,7 +5,12 @@ import numpy as np
 from sklearn.model_selection import StratifiedKFold
 from .bttwd_model import BTTWDModel
 from .bucket_rules import BucketTree
-from .baselines import train_eval_logreg, train_eval_random_forest
+from .baselines import (
+    train_eval_knn,
+    train_eval_logreg,
+    train_eval_random_forest,
+    train_eval_xgboost,
+)
 from .metrics import compute_binary_metrics, compute_s3_metrics, log_metrics
 from .utils_logging import log_info
 
@@ -32,6 +37,10 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
         baseline_results["LogReg"] = train_eval_logreg(X, y, cfg, skf)
     if cfg.get("BASELINES", {}).get("use_random_forest", False):
         baseline_results["RandomForest"] = train_eval_random_forest(X, y, cfg, skf)
+    if cfg.get("BASELINES", {}).get("use_knn", False):
+        baseline_results["KNN"] = train_eval_knn(X, y, cfg, skf)
+    if cfg.get("BASELINES", {}).get("use_xgboost", False):
+        baseline_results["XGBoost"] = train_eval_xgboost(X, y, cfg, skf)
 
     fold_idx = 1
     for train_idx, test_idx in skf.split(X, y):

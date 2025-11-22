@@ -3,6 +3,16 @@ from scipy import sparse
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_predict
+from sklearn.neighbors import KNeighborsClassifier
+
+try:
+    from xgboost import XGBClassifier
+
+    _XGB_AVAILABLE = True
+except ImportError:  # pragma: no cover - optional dependency
+    XGBClassifier = None
+    _XGB_AVAILABLE = False
+
 from .metrics import compute_binary_metrics, log_metrics
 from .utils_logging import log_info
 
@@ -60,4 +70,53 @@ def train_eval_random_forest(X, y, cfg, cv_splitter) -> dict:
     y_score = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict_proba")[:, 1]
     metrics_dict = compute_binary_metrics(y, y_pred, y_score, cfg.get("METRICS", {}))
     log_metrics("【基线-RF】整体指标：", metrics_dict)
+    return {"per_fold": None, "summary": metrics_dict}
+
+
+def train_eval_knn(X, y, cfg, cv_splitter) -> dict:
+    """
+    使用 KNN 作为全局基线模型，进行 k 折交叉验证。
+    """
+
+    X = _make_writable_matrix(X)
+    y = _make_writable_vector(y)
+    knn_cfg = cfg.get("BASELINES", {}).get("knn", {})
+    clf = KNeighborsClassifier(
+        n_neighbors=knn_cfg.get("n_neighbors", 10),
+    )
+    y_pred = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict")
+    y_score = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict_proba")[:, 1]
+    metrics_dict = compute_binary_metrics(y, y_pred, y_score, cfg.get("METRICS", {}))
+    log_metrics("【基线-KNN】整体指标：", metrics_dict)
+    return {"per_fold": None, "summary": metrics_dict}
+
+
+def train_eval_xgboost(X, y, cfg, cv_splitter) -> dict:
+    """
+    使用 XGBoost 作为全局基线模型，进行 k 折交叉验证。
+    """
+
+    if not _XGB_AVAILABLE:
+        raise RuntimeError("配置了 use_xgboost=True 但未安装 xgboost，请先安装该库。")
+
+    X = _make_writable_matrix(X)
+    y = _make_writable_vector(y)
+
+    xgb_cfg = cfg.get("BASELINES", {}).get("xgboost", {})
+    clf = XGBClassifier(
+        n_estimators=xgb_cfg.get("n_estimators", 300),
+        max_depth=xgb_cfg.get("max_depth", 4),
+        learning_rate=xgb_cfg.get("learning_rate", 0.1),
+        subsample=xgb_cfg.get("subsample", 0.8),
+        colsample_bytree=xgb_cfg.get("colsample_bytree", 0.8),
+        reg_lambda=xgb_cfg.get("reg_lambda", 1.0),
+        random_state=xgb_cfg.get("random_state", 42),
+        n_jobs=xgb_cfg.get("n_jobs", -1),
+        eval_metric="logloss",
+        use_label_encoder=False,
+    )
+    y_pred = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict")
+    y_score = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict_proba")[:, 1]
+    metrics_dict = compute_binary_metrics(y, y_pred, y_score, cfg.get("METRICS", {}))
+    log_metrics("【基线-XGB】整体指标：", metrics_dict)
     return {"per_fold": None, "summary": metrics_dict}
