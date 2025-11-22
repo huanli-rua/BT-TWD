@@ -1,0 +1,111 @@
+DATA:
+  dataset_name: "adult"
+  raw_path: "data/adult/adult.data"
+  target_col: "income"
+  positive_label: ">50K"
+  use_kfold: true
+  n_splits: 5
+  shuffle: true
+  stratify: true
+  random_state: 42
+
+PREPROCESS:
+  continuous_cols:
+    - "age"
+    - "fnlwgt"
+    - "education-num"
+    - "capital-gain"
+    - "capital-loss"
+    - "hours-per-week"
+  categorical_cols:
+    - "workclass"
+    - "education"
+    - "marital-status"
+    - "occupation"
+    - "relationship"
+    - "race"
+    - "sex"
+    - "native-country"
+  handle_missing: "question_mark"
+  fillna_strategy: "most_frequent"
+  scale_continuous: true
+  scaler_type: "standard"
+  encoding_type: "onehot"
+  drop_first: true
+  save_feature_names: true
+
+BTTWD:
+  bucket_levels:
+    - name: "L1_age"
+      type: "numeric_bin"
+      col: "age"
+      bins: [25, 35, 50]
+      labels: ["young", "mid", "old", "very_old"]
+    - name: "L2_education"
+      type: "categorical_group"
+      col: "education"
+      groups:
+        low:
+          - "Preschool"
+          - "1st-4th"
+          - "5th-6th"
+          - "7th-8th"
+        mid:
+          - "9th"
+          - "10th"
+          - "11th"
+          - "12th"
+          - "HS-grad"
+        high:
+          - "Assoc-acdm"
+          - "Assoc-voc"
+          - "Some-college"
+          - "Bachelors"
+        top:
+          - "Masters"
+          - "Doctorate"
+          - "Prof-school"
+  min_bucket_size: 200
+  use_global_backoff: true
+  posterior_estimator: "logreg"
+  logreg_C: 1.0
+  knn_k: 10
+  thresholds_mode: "bucket_wise"
+  alpha_init: 0.6
+  beta_init: 0.3
+  optimize_thresholds: true
+  threshold_objective: "F1"
+  threshold_search_grid:
+    alpha: [0.4, 0.5, 0.6, 0.7]
+    beta:  [0.1, 0.2, 0.3, 0.4]
+
+BASELINES:
+  use_logreg: true
+  use_random_forest: true
+  use_xgboost: false
+  logreg:
+    C: 1.0
+    max_iter: 200
+  random_forest:
+    n_estimators: 200
+    max_depth: null
+    random_state: 42
+
+EXP:
+  kfold_repeats: 1
+  n_jobs: -1
+  verbose: 1
+
+METRICS:
+  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa"]
+  pos_label: 1
+
+OUTPUT:
+  results_dir: "results"
+  figs_dir: "figs"
+  save_per_fold_metrics: true
+  save_bucket_metrics: true
+  save_config_copy: true
+
+SEED:
+  global_seed: 42
