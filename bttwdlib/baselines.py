@@ -11,7 +11,10 @@ def _make_writable_matrix(X):
     """Return a writable copy of X without breaking sparse inputs."""
 
     if sparse.issparse(X):
-        return X.copy()
+        X = X.copy()
+        if not X.data.flags.writeable:
+            X.data = np.array(X.data, copy=True)
+        return X
 
     arr = np.asarray(X)
     if arr.flags.writeable:

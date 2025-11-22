@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from scipy import sparse
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, MinMaxScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -54,16 +55,11 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
 
     # Ensure the transformed feature matrix is writable to avoid downstream
     # errors in cross-validation that expect a mutable buffer.
-    try:
-        from scipy import sparse  # Local import to keep optional dependency
-
-        if sparse.issparse(X):
-            X = X.copy()
-        else:
-            X = np.asarray(X)
-            if not X.flags.writeable:
-                X = np.array(X, copy=True)
-    except ImportError:
+    if sparse.issparse(X):
+        X = X.copy()
+        if not X.data.flags.writeable:
+            X.data = np.array(X.data, copy=True)
+    else:
         X = np.asarray(X)
         if not X.flags.writeable:
             X = np.array(X, copy=True)
