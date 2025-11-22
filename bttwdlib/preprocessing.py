@@ -52,6 +52,22 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
     pipeline = Pipeline(steps=[("preprocess", preprocessor)])
     X = pipeline.fit_transform(X_raw)
 
+    # Ensure the transformed feature matrix is writable to avoid downstream
+    # errors in cross-validation that expect a mutable buffer.
+    try:
+        from scipy import sparse  # Local import to keep optional dependency
+
+        if sparse.issparse(X):
+            X = X.copy()
+        else:
+            X = np.asarray(X)
+            if not X.flags.writeable:
+                X = np.array(X, copy=True)
+    except ImportError:
+        X = np.asarray(X)
+        if not X.flags.writeable:
+            X = np.array(X, copy=True)
+
     # 生成特征名
     feature_names = []
     if categorical_cols:
