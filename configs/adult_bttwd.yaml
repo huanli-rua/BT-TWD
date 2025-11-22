@@ -1,6 +1,6 @@
 DATA:
   dataset_name: "adult"
-  raw_path: "data/adult/adult.data"
+  raw_path: "../data/adult/adult.data"
   target_col: "income"
   positive_label: ">50K"
   use_kfold: true
