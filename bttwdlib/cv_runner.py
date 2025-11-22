@@ -33,8 +33,9 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
         log_info(f"【K折实验】正在执行第 {fold_idx}/{n_splits} 折...")
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
-        X_df_train = X_df_for_bucket.iloc[train_idx]
-        X_df_test = X_df_for_bucket.iloc[test_idx]
+        # 重新编号训练/测试数据的索引，确保与 X_train 对齐
+        X_df_train = X_df_for_bucket.iloc[train_idx].reset_index(drop=True)
+        X_df_test = X_df_for_bucket.iloc[test_idx].reset_index(drop=True)
 
         bucket_tree = BucketTree(cfg.get("BTTWD", {}).get("bucket_levels", []), feature_names=X_df_for_bucket.columns.tolist())
         bttwd_model = BTTWDModel(cfg, bucket_tree)
