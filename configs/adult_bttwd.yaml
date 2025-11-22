@@ -61,35 +61,36 @@ BTTWD:
       # 示例分法：<35 = 低工时，35-45 = 标准工作，>45 = 加班型
       bins: [35, 45]
       labels: ["low_hours", "normal_hours", "high_hours"]
-  min_bucket_size: 50
-  parent_share_rate: 0.2
-  min_parent_share: 50
-  val_ratio: 0.2
-  min_val_samples_per_bucket: 10
-  use_global_backoff: true
-  global_estimator: "xgb"
-  bucket_estimator: "knn"
-  posterior_estimator: "logreg"
-  logreg_C: 1.0
-  knn_k: 10
-  global_xgb:
-    n_estimators: 300
-    max_depth: 4
-    learning_rate: 0.1
-    subsample: 0.8
-    colsample_bytree: 0.8
-    reg_lambda: 1.0
-    random_state: 42
-    n_jobs: -1
-  thresholds_mode: "bucket_wise"
-  alpha_init: 0.6
-  beta_init: 0.2
-  optimize_thresholds: true
-  threshold_obj: "F1"
-  threshold_objective: "F1"
-  threshold_search_grid:
-    alpha: [0.4,0.45, 0.5,0.55, 0.6,0.65, 0.7,0.75, 0.8,0.85, 0.9,0.95]
-    beta:  [0.05,0.1,0.15, 0.2, 0.25, 0.3, 0.35, 0.4,0.45,0.5, 0.55, 0.6]
+  min_bucket_size: 100              # 叶子桶若不足该数量就不单独建模，直接并入父桶
+  parent_share_rate: 0.15           # 大桶向父桶贡献的样本比例
+  min_parent_share: 50             # 大桶向父桶贡献样本的最少数量
+  val_ratio: 0.2                   # 训练集中按该比例划分验证集用来选阈值
+  min_val_samples_per_bucket: 20   # 每个桶用于阈值搜索的最少验证集样本数
+  use_global_backoff: true         # 若桶和父桶都没有模型时是否回退使用全局模型
+  global_estimator: "xgb"          # 全局兜底模型类型
+  bucket_estimator: "knn"          # 桶内局部模型类型
+  posterior_estimator: "logreg"    # 后验概率校准或二分类模型类型
+  logreg_C: 1.0                    # 逻辑回归的正则化强度
+  knn_k: 10                        # KNN 模型的邻居数
+  global_xgb:                      # 全局 XGBoost 模型参数
+    n_estimators: 300              # 迭代树数
+    max_depth: 4                   # 树最大深度
+    learning_rate: 0.1             # 学习率
+    subsample: 0.8                 # 行采样比例
+    colsample_bytree: 0.8          # 列采样比例
+    reg_lambda: 1.0                # L2 正则项
+    random_state: 42               # 随机种子
+    n_jobs: -1                     # 并行线程数
+  thresholds_mode: "bucket_wise"   # 阈值按桶分别设定还是全局共享
+  alpha_init: 0.6                  # α 阈值初始值
+  beta_init: 0.2                   # β 阈值初始值
+  optimize_thresholds: true        # 是否启用自动阈值搜索
+  threshold_obj: "F1"              # 阈值搜索目标指标
+  threshold_objective: "F1"        # 同上，内部使用的指标字段
+  threshold_search_grid:           # 阈值搜索候选范围
+    alpha: [0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95]   # α 候选
+    beta:  [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4]    # β 候选
+
 
 BASELINES:
   use_logreg: true
@@ -105,7 +106,7 @@ BASELINES:
     random_state: 42
 
   knn:
-    n_neighbors: 10
+    n_neighbors: 6
 
   xgboost:
     n_estimators: 300
