@@ -33,7 +33,12 @@ class BucketTree:
             if unknown_mask.any():
                 log_info(f"【桶树】列 {col} 出现未知取值，{unknown_mask.sum()} 条记录记为 unknown")
                 part = part.astype(object).fillna("unknown")
-            bucket_parts.append(part.astype(str).apply(lambda v: f"{level_cfg.get('name')}={v}"))
+            level_num = level_cfg.get("level")
+            if level_num is not None:
+                level_name = f"L{level_num}_{col}"
+            else:
+                level_name = level_cfg.get("name", col)
+            bucket_parts.append(part.astype(str).apply(lambda v: f"{level_name}={v}"))
         bucket_id = bucket_parts[0]
         for idx in range(1, len(bucket_parts)):
             bucket_id = bucket_id + "|" + bucket_parts[idx]
@@ -42,3 +47,16 @@ class BucketTree:
 
     def get_level_names(self) -> list[str]:
         return [lvl.get("name") for lvl in self.levels_cfg]
+
+
+def get_parent_bucket_id(bucket_id: str) -> str | None:
+    """
+    输入一个桶ID，如 'L1_age=old|L2_education=mid|L3_hours=high_hours'，
+    返回其父桶ID：'L1_age=old|L2_education=mid'。
+    若已是顶层（例如只有 'L1_age=old'），则返回 None。
+    """
+
+    parts = bucket_id.split("|")
+    if len(parts) <= 1:
+        return None
+    return "|".join(parts[:-1])

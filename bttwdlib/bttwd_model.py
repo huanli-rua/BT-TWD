@@ -1,8 +1,10 @@
 import numpy as np
 import pandas as pd
+from collections import defaultdict
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import f1_score, balanced_accuracy_score
+from sklearn.model_selection import StratifiedShuffleSplit
 
 try:
     from xgboost import XGBClassifier
@@ -12,6 +14,7 @@ except ImportError:  # pragma: no cover - optional dependency
     XGBClassifier = None
     _XGB_AVAILABLE = False
 
+from .bucket_rules import get_parent_bucket_id
 from .utils_logging import log_info
 
 
@@ -19,12 +22,31 @@ class BTTWDModel:
     def __init__(self, cfg: dict, bucket_tree):
         self.cfg = cfg
         self.bucket_tree = bucket_tree
+
+        bcfg = cfg.get("BTTWD", {})
+        data_cfg = cfg.get("DATA", {})
+
+        self.min_bucket_size = bcfg.get("min_bucket_size", 50)
+        self.parent_share_rate = bcfg.get("parent_share_rate", 0.0)
+        self.min_parent_share = bcfg.get("min_parent_share", 0)
+        self.val_ratio = bcfg.get("val_ratio", 0.2)
+        self.min_val_samples_per_bucket = bcfg.get("min_val_samples_per_bucket", 10)
+        self.use_global_backoff = bcfg.get("use_global_backoff", True)
+        self.optimize_thresholds = bcfg.get("optimize_thresholds", True)
+        self.threshold_obj = bcfg.get("threshold_obj", bcfg.get("threshold_objective", "F1"))
+        threshold_grid_cfg = bcfg.get("threshold_grid", bcfg.get("threshold_search_grid", {}))
+        self.threshold_grid_alpha = threshold_grid_cfg.get("alpha", [])
+        self.threshold_grid_beta = threshold_grid_cfg.get("beta", [])
+        self.global_alpha = bcfg.get("alpha_init", 0.6)
+        self.global_beta = bcfg.get("beta_init", 0.3)
+        self.random_state = data_cfg.get("random_state", 42)
+
         self.bucket_models = {}
         self.bucket_thresholds = {}
         self.bucket_stats = {}
         self.global_model = None
-        self.global_alpha = cfg.get("BTTWD", {}).get("alpha_init", 0.6)
-        self.global_beta = cfg.get("BTTWD", {}).get("beta_init", 0.3)
+        self.global_pos_rate = 0.5
+        self.rng = np.random.default_rng(self.random_state)
 
     def _build_bucket_estimator(self):
         """构建桶内局部模型（例如 KNN 或逻辑回归）。"""
@@ -63,15 +85,7 @@ class BTTWDModel:
         return self._build_bucket_estimator()
 
     def _find_model_with_backoff(self, bucket_id: str):
-        """
-        给定一个完整桶ID（如 'L1_age=mid|L2_education=high|L3_hours=normal_hours'），
-        依次尝试：
-        - 完整ID
-        - 去掉最后一层
-        - 再去掉一层
-        直到找到已训练的桶模型；
-        如果都找不到，则返回 (None, None)。
-        """
+        """逐级回退查找桶模型。"""
 
         parts = bucket_id.split("|")
         for end in range(len(parts), 0, -1):
@@ -81,123 +95,226 @@ class BTTWDModel:
                 return model, candidate
         return None, None
 
+    def _search_thresholds(self, proba: np.ndarray, y_true: np.ndarray):
+        grid_alpha = self.threshold_grid_alpha or [self.global_alpha]
+        grid_beta = self.threshold_grid_beta or [self.global_beta]
+
+        best_alpha = self.global_alpha
+        best_beta = self.global_beta
+        best_score = -np.inf
+
+        for alpha in grid_alpha:
+            for beta in grid_beta:
+                if alpha < beta:
+                    continue
+                y_tmp = np.where(proba >= alpha, 1, np.where(proba <= beta, 0, 0))
+                if self.threshold_obj.upper() == "BAC":
+                    score = balanced_accuracy_score(y_true, y_tmp)
+                else:
+                    score = f1_score(y_true, y_tmp)
+                if score > best_score:
+                    best_score = score
+                    best_alpha, best_beta = alpha, beta
+        return best_alpha, best_beta, best_score
+
     def fit(self, X: np.ndarray, y: np.ndarray, X_df_for_bucket: pd.DataFrame):
+        # Step 0: 划分 inner 训练/验证集
+        if self.val_ratio > 0:
+            sss = StratifiedShuffleSplit(
+                n_splits=1, test_size=self.val_ratio, random_state=self.random_state
+            )
+            inner_train_idx, inner_val_idx = next(sss.split(X, y))
+        else:
+            inner_train_idx = np.arange(len(y))
+            inner_val_idx = np.array([], dtype=int)
+
+        inner_train_idx = np.asarray(inner_train_idx)
+        inner_val_idx = np.asarray(inner_val_idx)
+
+        self.global_pos_rate = float(np.mean(y))
+
+        # Step 1: 构建叶子与父桶的样本映射
         bucket_ids = self.bucket_tree.assign_buckets(X_df_for_bucket)
-        min_bucket_size = self.cfg.get("BTTWD", {}).get("min_bucket_size", 50)
-        # 全局模型
+        df_buckets = pd.DataFrame({"idx": np.arange(len(y)), "bucket_id": bucket_ids, "y": y})
+
+        leaf_index_map = {}
+        parent_index_map = defaultdict(list)
+
+        for bucket_id, g in df_buckets.groupby("bucket_id"):
+            idx_all = g["idx"].to_numpy()
+            y_bucket = g["y"].to_numpy()
+            n_bucket = len(idx_all)
+
+            parent_id = get_parent_bucket_id(bucket_id)
+
+            if n_bucket < self.min_bucket_size:
+                if parent_id is not None:
+                    parent_index_map[parent_id].extend(idx_all.tolist())
+                    log_info(
+                        f"【BTTWD】桶 {bucket_id} 样本太少(n={n_bucket})，全部并入父桶 {parent_id}"
+                    )
+                else:
+                    log_info(
+                        f"【BTTWD】顶层桶 {bucket_id} 样本太少(n={n_bucket})，仅使用全局模型兜底"
+                    )
+                continue
+
+            leaf_index_map[bucket_id] = idx_all
+
+            if parent_id is not None:
+                n_share = max(int(n_bucket * self.parent_share_rate), self.min_parent_share)
+                n_share = min(n_share, n_bucket)
+                share_idx = self.rng.choice(idx_all, size=n_share, replace=False)
+                parent_index_map[parent_id].extend(share_idx.tolist())
+                log_info(f"【BTTWD】桶 {bucket_id} 向父桶 {parent_id} 贡献 {len(share_idx)} 个典型样本")
+
+        # Step 2: 训练全局模型 + 阈值
+        X_train_inner = X[inner_train_idx]
+        y_train_inner = y[inner_train_idx]
+
         self.global_model = self._build_global_estimator()
-        self.global_model.fit(X, y)
+        self.global_model.fit(X_train_inner, y_train_inner)
         log_info("【BTTWD】全局模型训练完成，用于兜底预测")
 
-        grid_alpha = self.cfg.get("BTTWD", {}).get("threshold_search_grid", {}).get("alpha", [])
-        grid_beta = self.cfg.get("BTTWD", {}).get("threshold_search_grid", {}).get("beta", [])
-        threshold_obj = self.cfg.get("BTTWD", {}).get("threshold_objective", "F1")
+        if self.optimize_thresholds and len(inner_val_idx) > 0:
+            X_val_inner = X[inner_val_idx]
+            y_val_inner = y[inner_val_idx]
+            proba_val_inner = self.global_model.predict_proba(X_val_inner)[:, 1]
+            self.global_alpha, self.global_beta, _ = self._search_thresholds(proba_val_inner, y_val_inner)
 
-        for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
-            X_bucket = X[list(idxs)]
-            y_bucket = y[list(idxs)]
-            n_bucket = len(y_bucket)
-            pos_rate = y_bucket.mean()
+        # Step 3: 训练父桶模型
+        self.bucket_models = {}
+        self.bucket_thresholds = {}
+        self.bucket_stats = {}
 
-            # 1）样本数太少：构不成桶 → 用全局回退
-            if n_bucket < min_bucket_size:
-                log_info(
-                    f"【BTTWD】桶 {bucket_id} 样本太少(n={n_bucket})，使用全局回退（min_bucket_size={min_bucket_size}）"
-                )
-                # 注意：这里不往 bucket_models 里放东西，让它预测时自动走全局
+        for parent_id, idx_list in parent_index_map.items():
+            idx_all = np.array(sorted(set(idx_list)))
+            y_all = y[idx_all]
+
+            train_mask = np.isin(idx_all, inner_train_idx)
+            val_mask = np.isin(idx_all, inner_val_idx)
+
+            train_idx_bucket = idx_all[train_mask]
+            val_idx_bucket = idx_all[val_mask]
+
+            y_train_bucket = y[train_idx_bucket]
+            y_val_bucket = y[val_idx_bucket]
+
+            if len(y_train_bucket) < self.min_bucket_size or np.unique(y_train_bucket).size < 2:
+                log_info(f"【BTTWD】父桶 {parent_id} 训练样本不足或单类，跳过局部模型训练")
                 continue
 
-            # 2）单一类别桶：直接回退，不训练局部模型，避免 predict_proba 只有1列
-            unique_classes = np.unique(y_bucket)
-            if len(unique_classes) < 2:
-                log_info(
-                    f"【BTTWD】桶 {bucket_id} 仅包含单一类别 {int(unique_classes[0])} "
-                    f"(n={n_bucket})，跳过局部模型训练，使用全局回退"
-                )
-                # 你也可以顺便记一下统计信息（可选）
-                self.bucket_stats[bucket_id] = {
-                    "bucket_id": bucket_id,
-                    "n_samples": n_bucket,
-                    "pos_rate": pos_rate,
-                    "alpha": np.nan,
-                    "beta": np.nan,
-                    "train_score": np.nan,
-                }
-                continue
-
-            # 3）正常桶：训练局部模型 + 做阈值搜索
             model = self._build_bucket_estimator()
-            model.fit(X_bucket, y_bucket)
-            proba = model.predict_proba(X_bucket)[:, 1]
+            model.fit(X[train_idx_bucket], y_train_bucket)
 
-            best_alpha = self.global_alpha
-            best_beta = self.global_beta
-            best_score = -1
-            if self.cfg.get("BTTWD", {}).get("optimize_thresholds", True):
-                for a in grid_alpha:
-                    for b in grid_beta:
-                        if a < b:
-                            continue
-                        y_tmp = np.where(proba >= a, 1, np.where(proba <= b, 0, 0))
-                        if threshold_obj == "BAC":
-                            score = balanced_accuracy_score(y_bucket, y_tmp)
-                        else:
-                            score = f1_score(y_bucket, y_tmp)
-                        if score > best_score:
-                            best_score = score
-                            best_alpha, best_beta = a, b
+            use_full_bucket_for_threshold = False
+            if (
+                len(val_idx_bucket) >= self.min_val_samples_per_bucket
+                and np.unique(y_val_bucket).size >= 2
+            ):
+                proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
+                alpha, beta, score = self._search_thresholds(proba_val, y_val_bucket)
+            else:
+                proba_all = model.predict_proba(X[idx_all])[:, 1]
+                alpha, beta, score = self._search_thresholds(proba_all, y_all)
+                use_full_bucket_for_threshold = True
+
+            self.bucket_models[parent_id] = model
+            self.bucket_thresholds[parent_id] = (alpha, beta)
+            self.bucket_stats[parent_id] = {
+                "bucket_id": parent_id,
+                "level": "parent",
+                "n_samples_all": int(len(idx_all)),
+                "n_samples_train": int(len(train_idx_bucket)),
+                "n_samples_val": int(len(val_idx_bucket)),
+                "pos_rate": float(y_all.mean()),
+                "alpha": float(alpha),
+                "beta": float(beta),
+                "threshold_score": float(score),
+                "use_full_bucket_for_threshold": bool(use_full_bucket_for_threshold),
+            }
+
+        # Step 4: 训练叶子桶模型
+        for bucket_id, idx_all in leaf_index_map.items():
+            idx_all = np.asarray(idx_all)
+            y_all = y[idx_all]
+
+            train_mask = np.isin(idx_all, inner_train_idx)
+            val_mask = np.isin(idx_all, inner_val_idx)
+
+            train_idx_bucket = idx_all[train_mask]
+            val_idx_bucket = idx_all[val_mask]
+
+            y_train_bucket = y[train_idx_bucket]
+            y_val_bucket = y[val_idx_bucket]
+
+            if len(y_train_bucket) < self.min_bucket_size or np.unique(y_train_bucket).size < 2:
+                log_info(f"【BTTWD】叶子桶 {bucket_id} 训练样本不足或单类，跳过局部模型训练")
+                continue
+
+            model = self._build_bucket_estimator()
+            model.fit(X[train_idx_bucket], y_train_bucket)
+
+            use_full_bucket_for_threshold = False
+            if (
+                len(val_idx_bucket) >= self.min_val_samples_per_bucket
+                and np.unique(y_val_bucket).size >= 2
+            ):
+                proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
+                alpha, beta, score = self._search_thresholds(proba_val, y_val_bucket)
+            else:
+                proba_all = model.predict_proba(X[idx_all])[:, 1]
+                alpha, beta, score = self._search_thresholds(proba_all, y_all)
+                use_full_bucket_for_threshold = True
 
             self.bucket_models[bucket_id] = model
-            self.bucket_thresholds[bucket_id] = (best_alpha, best_beta)
+            self.bucket_thresholds[bucket_id] = (alpha, beta)
             self.bucket_stats[bucket_id] = {
                 "bucket_id": bucket_id,
-                "n_samples": n_bucket,
-                "pos_rate": pos_rate,
-                "alpha": best_alpha,
-                "beta": best_beta,
-                "train_score": best_score if best_score >= 0 else np.nan,
+                "level": "leaf",
+                "n_samples_all": int(len(idx_all)),
+                "n_samples_train": int(len(train_idx_bucket)),
+                "n_samples_val": int(len(val_idx_bucket)),
+                "pos_rate": float(y_all.mean()),
+                "alpha": float(alpha),
+                "beta": float(beta),
+                "threshold_score": float(score),
+                "use_full_bucket_for_threshold": bool(use_full_bucket_for_threshold),
             }
-            log_info(
-                f"【BTTWD】桶 {bucket_id}：n={n_bucket}, pos_rate={pos_rate:.2f}, "
-                f"alpha={best_alpha}, beta={best_beta}"
-            )
 
         log_info(
-            f"【BTTWD】共生成 {bucket_ids.nunique()} 个叶子桶，其中有效桶 {len(self.bucket_models)} 个（样本数 ≥ {min_bucket_size}）"
+            f"【BTTWD】共生成 {bucket_ids.nunique()} 个叶子桶，其中有效桶 {len(self.bucket_models)} 个（样本数 ≥ {self.min_bucket_size}）"
         )
 
     def predict_proba(self, X: np.ndarray, X_df_for_bucket: pd.DataFrame) -> np.ndarray:
         bucket_ids = self.bucket_tree.assign_buckets(X_df_for_bucket)
         proba = np.zeros(len(X))
-        use_backoff = self.cfg.get("BTTWD", {}).get("use_global_backoff", True)
-        verbose_backoff = self.cfg.get("EXP", {}).get("verbose_bucket_backoff", False)
+
         for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
             model, matched_bucket_id = self._find_model_with_backoff(bucket_id)
-            if model is None and use_backoff:
-                model = self.global_model
-                matched_bucket_id = "GLOBAL"
-            elif model is None:
-                proba[list(idxs)] = self.global_alpha
-                if verbose_backoff:
-                    log_info(f"【BTTWD】桶 {bucket_id} 未找到回退模型，使用全局alpha={self.global_alpha}")
+
+            if model is None:
+                if self.use_global_backoff and self.global_model is not None:
+                    proba[list(idxs)] = self.global_model.predict_proba(X[list(idxs)])[:, 1]
+                else:
+                    proba[list(idxs)] = self.global_pos_rate
                 continue
-            if verbose_backoff and matched_bucket_id != bucket_id:
-                log_info(f"【BTTWD】桶 {bucket_id} 回退到 {matched_bucket_id} 使用模型预测")
+
             proba[list(idxs)] = model.predict_proba(X[list(idxs)])[:, 1]
         return proba
 
     def predict(self, X: np.ndarray, X_df_for_bucket: pd.DataFrame) -> np.ndarray:
         proba = self.predict_proba(X, X_df_for_bucket)
         bucket_ids = self.bucket_tree.assign_buckets(X_df_for_bucket)
+
         preds = np.zeros(len(proba))
         for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
             _, matched_bucket_id = self._find_model_with_backoff(bucket_id)
-            if matched_bucket_id is not None:
-                alpha, beta = self.bucket_thresholds.get(
-                    matched_bucket_id, (self.global_alpha, self.global_beta)
-                )
+            if matched_bucket_id is not None and matched_bucket_id in self.bucket_thresholds:
+                alpha, beta = self.bucket_thresholds.get(matched_bucket_id, (self.global_alpha, self.global_beta))
             else:
                 alpha, beta = self.global_alpha, self.global_beta
+
             bucket_proba = proba[list(idxs)]
             bucket_pred = np.where(bucket_proba >= alpha, 1, np.where(bucket_proba <= beta, 0, -1))
             preds[list(idxs)] = bucket_pred
@@ -207,4 +324,4 @@ class BTTWDModel:
         if not self.bucket_stats:
             return pd.DataFrame()
         df = pd.DataFrame(self.bucket_stats.values())
-        return df.sort_values(by="n_samples", ascending=False)
+        return df.sort_values(by="n_samples_all", ascending=False)

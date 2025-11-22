@@ -36,13 +36,15 @@ PREPROCESS:
 
 BTTWD:
   bucket_levels:
-    - name: "L1_age"
+    - level: 1
+      name: "L1_age"
       type: "numeric_bin"
       col: "age"
       bins: [25, 35, 50]             # (-inf,25], (25,35], (35,50], (50,inf)
       labels: ["young", "mid", "old", "very_old"]
 
-    - name: "L2_education"
+    - level: 2
+      name: "L2_education"
       type: "categorical_group"
       col: "education"
       groups:
@@ -52,13 +54,18 @@ BTTWD:
         top:  ["Masters", "Doctorate", "Prof-school"]
       default_group: "unknown"       # 没在上面这些里的，统一归到 unknown
 
-    - name: "L3_hours"
+    - level: 3
+      name: "L3_hours"
       type: "numeric_bin"
       col: "hours-per-week"
       # 示例分法：<35 = 低工时，35-45 = 标准工作，>45 = 加班型
       bins: [35, 45]
       labels: ["low_hours", "normal_hours", "high_hours"]
-  min_bucket_size: 200
+  min_bucket_size: 50
+  parent_share_rate: 0.2
+  min_parent_share: 50
+  val_ratio: 0.2
+  min_val_samples_per_bucket: 10
   use_global_backoff: true
   global_estimator: "xgb"
   bucket_estimator: "knn"
@@ -78,6 +85,7 @@ BTTWD:
   alpha_init: 0.6
   beta_init: 0.2
   optimize_thresholds: true
+  threshold_obj: "F1"
   threshold_objective: "F1"
   threshold_search_grid:
     alpha: [0.4,0.45, 0.5,0.55, 0.6,0.65, 0.7,0.75, 0.8,0.85, 0.9,0.95]
