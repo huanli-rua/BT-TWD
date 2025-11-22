@@ -7,6 +7,9 @@ from .utils_logging import log_info
 
 
 def train_eval_logreg(X, y, cfg, cv_splitter) -> dict:
+    # Ensure writable, contiguous arrays to avoid downstream sklearn/joblib issues
+    X = np.array(X, copy=True)
+    y = np.array(y, copy=True)
     model_cfg = cfg.get("BASELINES", {}).get("logreg", {})
     clf = LogisticRegression(max_iter=model_cfg.get("max_iter", 200), C=model_cfg.get("C", 1.0))
     y_pred = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict")
@@ -17,6 +20,9 @@ def train_eval_logreg(X, y, cfg, cv_splitter) -> dict:
 
 
 def train_eval_random_forest(X, y, cfg, cv_splitter) -> dict:
+    # Ensure writable, contiguous arrays to avoid "buffer source array is read-only" errors
+    X = np.array(X, copy=True)
+    y = np.array(y, copy=True)
     rf_cfg = cfg.get("BASELINES", {}).get("random_forest", {})
     clf = RandomForestClassifier(
         n_estimators=rf_cfg.get("n_estimators", 200),
