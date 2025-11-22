@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
@@ -10,7 +11,11 @@ from .utils_logging import log_info
 
 
 def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
-    results_dir = cfg.get("OUTPUT", {}).get("results_dir", "results")
+    repo_root = Path(__file__).resolve().parent.parent
+    configured_results_dir = cfg.get("OUTPUT", {}).get("results_dir", "results")
+    results_dir = Path(configured_results_dir)
+    if not results_dir.is_absolute():
+        results_dir = repo_root / results_dir
     os.makedirs(results_dir, exist_ok=True)
 
     n_splits = cfg.get("DATA", {}).get("n_splits", 5)
