@@ -24,11 +24,13 @@ def show_cfg(cfg: dict) -> None:
     )
     bttwd_cfg = cfg.get("BTTWD", {})
     log_info(
-        f"【配置-BTTWD】阈值模式={bttwd_cfg.get('thresholds_mode')}, 后验估计器={bttwd_cfg.get('posterior_estimator')}"
+        f"【配置-BTTWD】阈值模式={bttwd_cfg.get('thresholds_mode')}, 全局模型={bttwd_cfg.get('global_estimator')}, "
+        f"桶内模型={bttwd_cfg.get('bucket_estimator')}, 后验估计器(兼容字段)={bttwd_cfg.get('posterior_estimator')}"
     )
     baseline_cfg = cfg.get("BASELINES", {})
     log_info(
-        f"【配置-基线】逻辑回归启用={baseline_cfg.get('use_logreg')}, 随机森林启用={baseline_cfg.get('use_random_forest')}"
+        f"【配置-基线】LogReg启用={baseline_cfg.get('use_logreg')}, RandomForest启用={baseline_cfg.get('use_random_forest')}, "
+        f"KNN启用={baseline_cfg.get('use_knn')}, XGBoost启用={baseline_cfg.get('use_xgboost')}"
     )
 
 
