@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover - optional dependency
     XGBClassifier = None
     _XGB_AVAILABLE = False
 
-from .metrics import compute_binary_metrics, log_metrics
+from .metrics import compute_binary_metrics, log_metrics, predict_binary_by_cost
 from .utils_logging import log_info
 
 
