@@ -2,7 +2,7 @@ import numpy as np
 from scipy import sparse
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import cross_val_predict
+from sklearn.model_selection import StratifiedKFold
 from sklearn.neighbors import KNeighborsClassifier
 
 try:
@@ -42,35 +42,79 @@ def _make_writable_vector(y):
     return arr
 
 
-def train_eval_logreg(X, y, cfg, cv_splitter) -> dict:
-    # Ensure writable inputs for consistent downstream behavior
+def _aggregate_baseline_summary(per_fold_records: list[dict]) -> dict:
+    if not per_fold_records:
+        return {}
+    df = np.rec.fromrecords([{k: v for k, v in rec.items() if k != "fold"} for rec in per_fold_records])
+    summary = {}
+    for col in df.dtype.names:
+        values = np.array([getattr(r, col) for r in df])
+        summary[f"{col}_mean"] = float(np.nanmean(values))
+        summary[f"{col}_std"] = float(np.nanstd(values))
+    return summary
+
+
+def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter) -> dict:
     X = _make_writable_matrix(X)
     y = _make_writable_vector(y)
+
+    costs = cfg.get("THRESHOLDS", {}).get("costs", {})
+    metrics_cfg = cfg.get("METRICS", {})
+
+    per_fold_records: list[dict] = []
+    if isinstance(cv_splitter, StratifiedKFold):
+        splitter = cv_splitter
+    else:
+        splitter = StratifiedKFold(
+            n_splits=getattr(cv_splitter, "n_splits", 5),
+            shuffle=True,
+            random_state=42,
+        )
+
+    fold_idx = 1
+    for train_idx, test_idx in splitter.split(X, y):
+        clf = model_builder()
+        clf.fit(X[train_idx], y[train_idx])
+
+        y_pred = clf.predict(X[test_idx])
+        if hasattr(clf, "predict_proba"):
+            y_score = clf.predict_proba(X[test_idx])[:, 1]
+        else:
+            y_score = np.zeros_like(y_pred, dtype=float)
+
+        metrics_dict = compute_binary_metrics(y[test_idx], y_pred, y_score, metrics_cfg, costs=costs)
+        metrics_dict.setdefault("BND_ratio", 0.0)
+        metrics_dict.setdefault("POS_Coverage", float("nan"))
+        metrics_dict["fold"] = fold_idx
+        per_fold_records.append(metrics_dict)
+        fold_idx += 1
+
+    summary = _aggregate_baseline_summary(per_fold_records)
+    log_metrics(f"【基线-{model_name}】整体指标：", summary)
+    return {"per_fold": per_fold_records, "summary": summary}
+
+
+def train_eval_logreg(X, y, cfg, cv_splitter) -> dict:
     model_cfg = cfg.get("BASELINES", {}).get("logreg", {})
-    clf = LogisticRegression(max_iter=model_cfg.get("max_iter", 200), C=model_cfg.get("C", 1.0))
-    y_pred = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict")
-    y_score = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict_proba")[:, 1]
-    metrics_dict = compute_binary_metrics(y, y_pred, y_score, cfg.get("METRICS", {}))
-    log_metrics("【基线-LogReg】整体指标：", metrics_dict)
-    return {"per_fold": None, "summary": metrics_dict}
+
+    def _builder():
+        return LogisticRegression(max_iter=model_cfg.get("max_iter", 200), C=model_cfg.get("C", 1.0))
+
+    return _run_baseline_cv(_builder, "LogReg", X, y, cfg, cv_splitter)
 
 
 def train_eval_random_forest(X, y, cfg, cv_splitter) -> dict:
-    # Ensure X, y are writable dense arrays for RandomForest
-    X = _make_writable_matrix(X)
-    y = _make_writable_vector(y)
     rf_cfg = cfg.get("BASELINES", {}).get("random_forest", {})
-    clf = RandomForestClassifier(
-        n_estimators=rf_cfg.get("n_estimators", 200),
-        max_depth=rf_cfg.get("max_depth"),
-        random_state=rf_cfg.get("random_state", 42),
-        n_jobs=cfg.get("EXP", {}).get("n_jobs", -1),
-    )
-    y_pred = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict")
-    y_score = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict_proba")[:, 1]
-    metrics_dict = compute_binary_metrics(y, y_pred, y_score, cfg.get("METRICS", {}))
-    log_metrics("【基线-RF】整体指标：", metrics_dict)
-    return {"per_fold": None, "summary": metrics_dict}
+
+    def _builder():
+        return RandomForestClassifier(
+            n_estimators=rf_cfg.get("n_estimators", 200),
+            max_depth=rf_cfg.get("max_depth"),
+            random_state=rf_cfg.get("random_state", 42),
+            n_jobs=cfg.get("EXP", {}).get("n_jobs", -1),
+        )
+
+    return _run_baseline_cv(_builder, "RF", X, y, cfg, cv_splitter)
 
 
 def train_eval_knn(X, y, cfg, cv_splitter) -> dict:
@@ -78,17 +122,14 @@ def train_eval_knn(X, y, cfg, cv_splitter) -> dict:
     使用 KNN 作为全局基线模型，进行 k 折交叉验证。
     """
 
-    X = _make_writable_matrix(X)
-    y = _make_writable_vector(y)
     knn_cfg = cfg.get("BASELINES", {}).get("knn", {})
-    clf = KNeighborsClassifier(
-        n_neighbors=knn_cfg.get("n_neighbors", 10),
-    )
-    y_pred = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict")
-    y_score = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict_proba")[:, 1]
-    metrics_dict = compute_binary_metrics(y, y_pred, y_score, cfg.get("METRICS", {}))
-    log_metrics("【基线-KNN】整体指标：", metrics_dict)
-    return {"per_fold": None, "summary": metrics_dict}
+
+    def _builder():
+        return KNeighborsClassifier(
+            n_neighbors=knn_cfg.get("n_neighbors", 10),
+        )
+
+    return _run_baseline_cv(_builder, "KNN", X, y, cfg, cv_splitter)
 
 
 def train_eval_xgboost(X, y, cfg, cv_splitter) -> dict:
@@ -99,24 +140,20 @@ def train_eval_xgboost(X, y, cfg, cv_splitter) -> dict:
     if not _XGB_AVAILABLE:
         raise RuntimeError("配置了 use_xgboost=True 但未安装 xgboost，请先安装该库。")
 
-    X = _make_writable_matrix(X)
-    y = _make_writable_vector(y)
-
     xgb_cfg = cfg.get("BASELINES", {}).get("xgboost", {})
-    clf = XGBClassifier(
-        n_estimators=xgb_cfg.get("n_estimators", 300),
-        max_depth=xgb_cfg.get("max_depth", 4),
-        learning_rate=xgb_cfg.get("learning_rate", 0.1),
-        subsample=xgb_cfg.get("subsample", 0.8),
-        colsample_bytree=xgb_cfg.get("colsample_bytree", 0.8),
-        reg_lambda=xgb_cfg.get("reg_lambda", 1.0),
-        random_state=xgb_cfg.get("random_state", 42),
-        n_jobs=xgb_cfg.get("n_jobs", -1),
-        eval_metric="logloss",
-        use_label_encoder=False,
-    )
-    y_pred = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict")
-    y_score = cross_val_predict(clf, X, y, cv=cv_splitter, method="predict_proba")[:, 1]
-    metrics_dict = compute_binary_metrics(y, y_pred, y_score, cfg.get("METRICS", {}))
-    log_metrics("【基线-XGB】整体指标：", metrics_dict)
-    return {"per_fold": None, "summary": metrics_dict}
+
+    def _builder():
+        return XGBClassifier(
+            n_estimators=xgb_cfg.get("n_estimators", 300),
+            max_depth=xgb_cfg.get("max_depth", 4),
+            learning_rate=xgb_cfg.get("learning_rate", 0.1),
+            subsample=xgb_cfg.get("subsample", 0.8),
+            colsample_bytree=xgb_cfg.get("colsample_bytree", 0.8),
+            reg_lambda=xgb_cfg.get("reg_lambda", 1.0),
+            random_state=xgb_cfg.get("random_state", 42),
+            n_jobs=xgb_cfg.get("n_jobs", -1),
+            eval_metric="logloss",
+            use_label_encoder=False,
+        )
+
+    return _run_baseline_cv(_builder, "XGB", X, y, cfg, cv_splitter)

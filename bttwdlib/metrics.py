@@ -4,7 +4,7 @@ from .utils_logging import log_info
 from .threshold_search import compute_regret
 
 
-def compute_binary_metrics(y_true, y_pred, y_score, cfg_metrics) -> dict:
+def compute_binary_metrics(y_true, y_pred, y_score, cfg_metrics, costs: dict | None = None) -> dict:
     pos_label = cfg_metrics.get("pos_label", 1)
     metrics_to_use = cfg_metrics.get(
         "use_metrics",
@@ -28,6 +28,12 @@ def compute_binary_metrics(y_true, y_pred, y_score, cfg_metrics) -> dict:
         output["MCC"] = skm.matthews_corrcoef(y_true, y_pred)
     if "Kappa" in metrics_to_use:
         output["Kappa"] = skm.cohen_kappa_score(y_true, y_pred)
+    metrics_to_use = cfg_metrics.get("use_metrics", [])
+    if costs is not None and (not metrics_to_use or "Regret" in metrics_to_use):
+        # Baseline 是二分类预测，直接把 y_pred 当作三支预测进行后悔值计算
+        output["Regret"] = compute_regret(y_true, y_pred, costs)
+        output.setdefault("BND_ratio", 0.0)
+        output.setdefault("POS_Coverage", float("nan"))
     return output
 
 
