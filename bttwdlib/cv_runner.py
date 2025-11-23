@@ -12,6 +12,7 @@ from .baselines import (
     train_eval_xgboost,
 )
 from .metrics import compute_binary_metrics, compute_s3_metrics, log_metrics
+from .threshold_search import compute_regret
 from .utils_logging import log_info
 
 
@@ -30,6 +31,8 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
 
     per_fold_records = []
     bucket_metrics_records = []
+    threshold_log_records = []
+    threshold_costs = cfg.get("THRESHOLDS", {}).get("costs", {})
 
     # 运行基线整体（使用 cross_val_predict）
     baseline_results = {}
@@ -60,23 +63,52 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
         y_pred_binary = np.where(y_pred_s3 == 1, 1, 0)
 
         metrics_binary = compute_binary_metrics(y_test, y_pred_binary, y_score, cfg.get("METRICS", {}))
-        metrics_s3 = compute_s3_metrics(y_test, y_pred_s3, y_score, cfg.get("METRICS", {}))
+        metrics_s3 = compute_s3_metrics(y_test, y_pred_s3, y_score, cfg.get("METRICS", {}), costs=threshold_costs)
         log_metrics("【BTTWD】本折指标：", metrics_binary)
 
-        per_fold_records.append(
-            {
-                "fold": fold_idx,
-                "model": "BTTWD",
-                **metrics_binary,
-            }
-        )
+        fold_record = {"fold": fold_idx, "model": "BTTWD", **metrics_binary}
+        for k, v in metrics_s3.items():
+            if k not in fold_record:
+                fold_record[k] = v
+        per_fold_records.append(fold_record)
         for model_name, res in baseline_results.items():
             if res["per_fold"] is None:
                 continue
         bucket_df = bttwd_model.get_bucket_stats()
         if not bucket_df.empty:
+            test_bucket_ids = bucket_tree.assign_buckets(X_df_test)
+            test_bucket_records = []
+            for bucket_id, idxs in test_bucket_ids.groupby(test_bucket_ids).groups.items():
+                idx_list = list(idxs)
+                y_true_bucket = y_test[idx_list]
+                y_pred_bucket = y_pred_s3[idx_list]
+                test_bucket_records.append(
+                    {
+                        "bucket_id": bucket_id,
+                        "n_test": len(idx_list),
+                        "pos_rate_test": float(np.mean(y_true_bucket)) if len(idx_list) else np.nan,
+                        "BND_ratio_test": float(np.mean(np.isin(y_pred_bucket, [-1, "BND"]))),
+                        "POS_Coverage_test": float(np.mean(np.array(y_pred_bucket) == 1)),
+                        "regret_test": compute_regret(y_true_bucket, y_pred_bucket, threshold_costs),
+                    }
+                )
+
+            test_bucket_df = pd.DataFrame(test_bucket_records)
+            if not test_bucket_df.empty:
+                bucket_df = bucket_df.merge(test_bucket_df, on="bucket_id", how="left")
+            else:
+                bucket_df["n_test"] = np.nan
+                bucket_df["pos_rate_test"] = np.nan
+                bucket_df["BND_ratio_test"] = np.nan
+                bucket_df["POS_Coverage_test"] = np.nan
+                bucket_df["regret_test"] = np.nan
             bucket_df["fold"] = fold_idx
             bucket_metrics_records.append(bucket_df)
+
+        th_logs = bttwd_model.get_threshold_logs()
+        if not th_logs.empty:
+            th_logs["fold"] = fold_idx
+            threshold_log_records.append(th_logs)
 
         fold_idx += 1
 
@@ -84,8 +116,13 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
     bttwd_df = pd.DataFrame(per_fold_records)
     summary_rows = []
     if not bttwd_df.empty:
-        bttwd_summary = bttwd_df.drop(columns=["fold", "model"]).mean().to_dict()
-        bttwd_summary["model"] = "BTTWD"
+        metric_cols = [c for c in bttwd_df.columns if c not in ["fold", "model"]]
+        mean_series = bttwd_df[metric_cols].mean()
+        std_series = bttwd_df[metric_cols].std()
+        bttwd_summary = {"model": "BTTWD"}
+        for col in metric_cols:
+            bttwd_summary[f"{col}_mean"] = mean_series[col]
+            bttwd_summary[f"{col}_std"] = std_series[col]
         summary_rows.append(bttwd_summary)
 
     for model_name, res in baseline_results.items():
@@ -103,6 +140,11 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
     if bucket_metrics_records and cfg.get("OUTPUT", {}).get("save_bucket_metrics", True):
         all_bucket_df = pd.concat(bucket_metrics_records, ignore_index=True)
         all_bucket_df.to_csv(os.path.join(results_dir, "bucket_metrics.csv"), index=False)
+    if threshold_log_records and cfg.get("OUTPUT", {}).get("save_threshold_logs", True):
+        th_filename = cfg.get("OUTPUT", {}).get("threshold_log_filename", "bucket_thresholds_per_fold.csv")
+        pd.concat(threshold_log_records, ignore_index=True).to_csv(
+            os.path.join(results_dir, th_filename), index=False
+        )
     log_info("【K折实验】所有结果已写入 results 目录")
 
     return {"baselines": baseline_results, "bttwd": {"per_fold": per_fold_records, "summary": summary_rows}}
