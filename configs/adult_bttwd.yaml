@@ -69,7 +69,7 @@ BTTWD:
   min_val_samples_per_bucket: 20   # 每个桶用于阈值搜索的最少验证集样本数
   use_global_backoff: true         # 若桶和父桶都没有模型时是否回退使用全局模型
   global_estimator: "xgb"          # 全局兜底模型类型
-  bucket_estimator: "knn"          # 桶内局部模型类型
+  bucket_estimator: "none"          # 桶内局部模型类型
   posterior_estimator: "logreg"    # 后验概率校准或二分类模型类型
   logreg_C: 1.0                    # 逻辑回归的正则化强度
   knn_k: 10                        # KNN 模型的邻居数
