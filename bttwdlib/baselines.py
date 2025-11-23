@@ -80,7 +80,7 @@ def _aggregate_baseline_summary(per_fold_records: list[dict]) -> dict:
 
 
 
-def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter) -> dict:
+def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
     X = _make_writable_matrix(X)
     y = _make_writable_vector(y)
 
@@ -107,7 +107,7 @@ def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter) -> 
         else:
             y_score = np.zeros_like(y_pred, dtype=float)
 
-        metrics_dict = compute_binary_metrics(y[test_idx], y_pred, y_score, metrics_cfg)
+        metrics_dict = compute_binary_metrics(y[test_idx], y_pred, y_score, metrics_cfg, costs=costs)
         metrics_dict.setdefault("BND_ratio", 0.0)
         metrics_dict.setdefault("POS_Coverage", float("nan"))
         metrics_dict["fold"] = fold_idx
@@ -119,16 +119,16 @@ def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter) -> 
     return {"per_fold": per_fold_records, "summary": summary}
 
 
-def train_eval_logreg(X, y, cfg, cv_splitter) -> dict:
+def train_eval_logreg(X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
     model_cfg = cfg.get("BASELINES", {}).get("logreg", {})
 
     def _builder():
         return LogisticRegression(max_iter=model_cfg.get("max_iter", 200), C=model_cfg.get("C", 1.0))
 
-    return _run_baseline_cv(_builder, "LogReg", X, y, cfg, cv_splitter)
+    return _run_baseline_cv(_builder, "LogReg", X, y, cfg, cv_splitter, costs=costs)
 
 
-def train_eval_random_forest(X, y, cfg, cv_splitter) -> dict:
+def train_eval_random_forest(X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
     rf_cfg = cfg.get("BASELINES", {}).get("random_forest", {})
 
     def _builder():
@@ -139,10 +139,10 @@ def train_eval_random_forest(X, y, cfg, cv_splitter) -> dict:
             n_jobs=cfg.get("EXP", {}).get("n_jobs", -1),
         )
 
-    return _run_baseline_cv(_builder, "RF", X, y, cfg, cv_splitter)
+    return _run_baseline_cv(_builder, "RF", X, y, cfg, cv_splitter, costs=costs)
 
 
-def train_eval_knn(X, y, cfg, cv_splitter) -> dict:
+def train_eval_knn(X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
     """
     使用 KNN 作为全局基线模型，进行 k 折交叉验证。
     """
@@ -154,10 +154,10 @@ def train_eval_knn(X, y, cfg, cv_splitter) -> dict:
             n_neighbors=knn_cfg.get("n_neighbors", 10),
         )
 
-    return _run_baseline_cv(_builder, "KNN", X, y, cfg, cv_splitter)
+    return _run_baseline_cv(_builder, "KNN", X, y, cfg, cv_splitter, costs=costs)
 
 
-def train_eval_xgboost(X, y, cfg, cv_splitter) -> dict:
+def train_eval_xgboost(X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
     """
     使用 XGBoost 作为全局基线模型，进行 k 折交叉验证。
     """
@@ -181,4 +181,4 @@ def train_eval_xgboost(X, y, cfg, cv_splitter) -> dict:
             use_label_encoder=False,
         )
 
-    return _run_baseline_cv(_builder, "XGB", X, y, cfg, cv_splitter)
+    return _run_baseline_cv(_builder, "XGB", X, y, cfg, cv_splitter, costs=costs)

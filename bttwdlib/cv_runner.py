@@ -42,13 +42,13 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
     # 运行基线整体（使用 cross_val_predict）
     baseline_results = {}
     if cfg.get("BASELINES", {}).get("use_logreg", False):
-        baseline_results["LogReg"] = train_eval_logreg(X, y, cfg, skf)
+        baseline_results["LogReg"] = train_eval_logreg(X, y, cfg, skf, costs=threshold_costs)
     if cfg.get("BASELINES", {}).get("use_random_forest", False):
-        baseline_results["RandomForest"] = train_eval_random_forest(X, y, cfg, skf)
+        baseline_results["RandomForest"] = train_eval_random_forest(X, y, cfg, skf, costs=threshold_costs)
     if cfg.get("BASELINES", {}).get("use_knn", False):
-        baseline_results["KNN"] = train_eval_knn(X, y, cfg, skf)
+        baseline_results["KNN"] = train_eval_knn(X, y, cfg, skf, costs=threshold_costs)
     if cfg.get("BASELINES", {}).get("use_xgboost", False):
-        baseline_results["XGBoost"] = train_eval_xgboost(X, y, cfg, skf)
+        baseline_results["XGBoost"] = train_eval_xgboost(X, y, cfg, skf, costs=threshold_costs)
 
     fold_idx = 1
     for train_idx, test_idx in skf.split(X, y):
