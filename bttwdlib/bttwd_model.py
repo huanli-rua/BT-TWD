@@ -295,7 +295,12 @@ class BTTWDModel:
         log_info("【BTTWD】全局模型(L0)训练完成，用于兜底预测")
 
         if self.optimize_thresholds:
-            global_val_idx = np.array(sorted(set(aggregated_val.get(self.global_bucket_id, inner_val_idx.tolist()))))
+            global_val_candidates = aggregated_val.get(self.global_bucket_id, [])
+            # Always include the held-out validation split for threshold search;
+            # fall back to training data only if absolutely no validation samples exist.
+            global_val_idx = np.array(
+                sorted(set(global_val_candidates).union(set(inner_val_idx.tolist())))
+            )
             if len(global_val_idx) == 0:
                 global_val_idx = global_train_idx
             proba_val_inner = self.global_model.predict_proba(X[global_val_idx])[:, 1]
