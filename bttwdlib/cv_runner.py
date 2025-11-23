@@ -62,18 +62,17 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
         y_pred_s3 = bttwd_model.predict(X_test, X_df_test)
         y_pred_binary = np.where(y_pred_s3 == 1, 1, 0)
 
-        metrics_binary = compute_binary_metrics(y_test, y_pred_binary, y_score, cfg.get("METRICS", {}))
+        metrics_binary = compute_binary_metrics(
+            y_test, y_pred_binary, y_score, cfg.get("METRICS", {}), costs=threshold_costs
+        )
         metrics_s3 = compute_s3_metrics(y_test, y_pred_s3, y_score, cfg.get("METRICS", {}), costs=threshold_costs)
-        log_metrics("【BTTWD】本折指标：", metrics_binary)
+        log_metrics("【BTTWD】三支指标(含后悔)：", metrics_s3)
 
         fold_record = {"fold": fold_idx, "model": "BTTWD", **metrics_binary}
         for k, v in metrics_s3.items():
             if k not in fold_record:
                 fold_record[k] = v
         per_fold_records.append(fold_record)
-        for model_name, res in baseline_results.items():
-            if res["per_fold"] is None:
-                continue
         bucket_df = bttwd_model.get_bucket_stats()
         if not bucket_df.empty:
             test_bucket_ids = bucket_tree.assign_buckets(X_df_test)
@@ -131,14 +130,21 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
             row.update(res["summary"])
             summary_rows.append(row)
 
+        if res.get("per_fold"):
+            for rec in res["per_fold"]:
+                per_fold_records.append({"model": model_name, **rec})
+
     summary_df = pd.DataFrame(summary_rows)
+    per_fold_output_df = pd.DataFrame(per_fold_records)
 
     # 写文件
     if cfg.get("OUTPUT", {}).get("save_per_fold_metrics", True):
-        bttwd_df.to_csv(os.path.join(results_dir, "metrics_kfold_per_fold.csv"), index=False)
+        per_fold_output_df.to_csv(os.path.join(results_dir, "metrics_kfold_per_fold.csv"), index=False)
     summary_df.to_csv(os.path.join(results_dir, "metrics_kfold_summary.csv"), index=False)
     if bucket_metrics_records and cfg.get("OUTPUT", {}).get("save_bucket_metrics", True):
         all_bucket_df = pd.concat(bucket_metrics_records, ignore_index=True)
+        if "pos_rate_all" in all_bucket_df.columns and "pos_rate" not in all_bucket_df.columns:
+            all_bucket_df["pos_rate"] = all_bucket_df["pos_rate_all"]
         all_bucket_df.to_csv(os.path.join(results_dir, "bucket_metrics.csv"), index=False)
     if threshold_log_records and cfg.get("OUTPUT", {}).get("save_threshold_logs", True):
         th_filename = cfg.get("OUTPUT", {}).get("threshold_log_filename", "bucket_thresholds_per_fold.csv")
