@@ -4,6 +4,24 @@ from .utils_logging import log_info
 from .threshold_search import compute_regret
 
 
+def predict_binary_by_cost(probs, costs: dict) -> np.ndarray:
+    """根据成本矩阵与后验概率，选择期望损失更小的二分类预测标签。"""
+
+    prob_arr = np.asarray(probs, dtype=float)
+    p1 = prob_arr
+    p0 = 1.0 - p1
+
+    c_tp = costs.get("C_TP", 0.0)
+    c_fp = costs.get("C_FP", 0.0)
+    c_fn = costs.get("C_FN", 0.0)
+    c_tn = costs.get("C_TN", 0.0)
+
+    loss_pos = c_tp * p1 + c_fp * p0
+    loss_neg = c_fn * p1 + c_tn * p0
+
+    return np.where(loss_pos < loss_neg, 1, 0)
+
+
 def compute_binary_metrics(y_true, y_pred, y_score, cfg_metrics, costs: dict | None = None) -> dict:
     pos_label = cfg_metrics.get("pos_label", 1)
     metrics_to_use = cfg_metrics.get(
@@ -44,9 +62,13 @@ def compute_s3_metrics(y_true, y_s3_pred, y_score, cfg_metrics, costs: dict | No
 
     y_s3_pred_arr = np.array(y_s3_pred)
     bnd_mask = (y_s3_pred_arr == -1) | (y_s3_pred_arr == "BND")
-    y_pred_binary = np.where(y_s3_pred_arr == 1, 1, 0)
     bnd_ratio = bnd_mask.mean()
     pos_coverage = float(np.mean(y_s3_pred_arr == 1))
+
+    if costs:
+        y_pred_binary = predict_binary_by_cost(y_score, costs)
+    else:
+        y_pred_binary = np.where(y_s3_pred_arr == 1, 1, 0)
 
     metrics_dict = compute_binary_metrics(y_true, y_pred_binary, y_score, cfg_metrics)
     metrics_dict["BND_ratio"] = bnd_ratio
