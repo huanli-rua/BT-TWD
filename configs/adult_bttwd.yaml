@@ -54,13 +54,13 @@ BTTWD:
         top:  ["Masters", "Doctorate", "Prof-school"]
       default_group: "unknown"       # 没在上面这些里的，统一归到 unknown
 
-    # - level: 3
-    #   name: "L3_hours"
-    #   type: "numeric_bin"
-    #   col: "hours-per-week"
-    #   # 示例分法：<35 = 低工时，35-45 = 标准工作，>45 = 加班型
-    #   bins: [35, 45]
-    #   labels: ["low_hours", "normal_hours", "high_hours"]
+    - level: 3
+      name: "L3_hours"
+      type: "numeric_bin"
+      col: "hours-per-week"
+      # 示例分法：<35 = 低工时，35-45 = 标准工作，>45 = 加班型
+      bins: [35, 45]
+      labels: ["low_hours", "normal_hours", "high_hours"]
   min_bucket_size: 100              # 叶子桶若不足该数量就不单独建模，直接并入父桶
   parent_share_rate: 0.2           # 大桶向父桶贡献的样本比例
   min_parent_share: 50             # 大桶向父桶贡献样本的最少数量

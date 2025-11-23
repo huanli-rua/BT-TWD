@@ -43,15 +43,41 @@ def _make_writable_vector(y):
 
 
 def _aggregate_baseline_summary(per_fold_records: list[dict]) -> dict:
+    """
+    将基线模型的每折指标做均值/标准差汇总。
+    per_fold_records: [{'Precision': ..., 'Recall': ..., ..., 'fold': 1}, ...]
+    """
     if not per_fold_records:
         return {}
-    df = np.rec.fromrecords([{k: v for k, v in rec.items() if k != "fold"} for rec in per_fold_records])
-    summary = {}
-    for col in df.dtype.names:
-        values = np.array([getattr(r, col) for r in df])
-        summary[f"{col}_mean"] = float(np.nanmean(values))
-        summary[f"{col}_std"] = float(np.nanstd(values))
+
+    # 取出所有列名，去掉 fold
+    keys = set()
+    for rec in per_fold_records:
+        keys.update(rec.keys())
+    keys.discard("fold")
+
+    summary: dict = {}
+    for col in sorted(keys):
+        values = []
+        for rec in per_fold_records:
+            v = rec.get(col, np.nan)
+            # 避免把 dict / list 之类塞进来，这里只聚合标量数值
+            if isinstance(v, (int, float, np.number)) or v is None or np.isnan(v):
+                values.append(v)
+            else:
+                # 如果真的有非数值（一般不会有），直接跳过该列
+                values = None
+                break
+
+        if values is None:
+            continue
+
+        arr = np.array(values, dtype=float)
+        summary[f"{col}_mean"] = float(np.nanmean(arr))
+        summary[f"{col}_std"] = float(np.nanstd(arr))
+
     return summary
+
 
 
 def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter) -> dict:
