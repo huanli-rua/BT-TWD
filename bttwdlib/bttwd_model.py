@@ -3,6 +3,8 @@ import pandas as pd
 from collections import defaultdict
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import GaussianNB
 from sklearn.model_selection import StratifiedShuffleSplit
 
 try:
@@ -64,15 +66,59 @@ class BTTWDModel:
         self.global_model = None
         self.global_pos_rate = 0.5
         self.rng = np.random.default_rng(self.random_state)
+        self.bucket_estimator = self._build_bucket_estimator()
 
-    def _build_bucket_estimator(self):
+    def _build_bucket_estimator(self, est_name=None):
         """构建桶内局部模型（例如 KNN 或逻辑回归）。"""
 
         bcfg = self.cfg.get("BTTWD", {})
-        est_name = bcfg.get("bucket_estimator", bcfg.get("posterior_estimator", "logreg"))
+        if est_name is None:
+            est_name = bcfg.get("bucket_estimator", bcfg.get("posterior_estimator", "logreg"))
+        est_name = str(est_name).lower() if est_name is not None else "logreg"
+
+        none_aliases = {"none", "no", "null", "disabled"}
+        if est_name in none_aliases:
+            return None
+
         if est_name == "knn":
             return KNeighborsClassifier(n_neighbors=bcfg.get("knn_k", 10))
-        return LogisticRegression(max_iter=200, C=bcfg.get("logreg_C", 1.0))
+
+        if est_name in {"logreg", "lr", "logistic", "logistic_regression"}:
+            return LogisticRegression(
+                max_iter=bcfg.get("logreg_max_iter", 200), C=bcfg.get("logreg_C", 1.0)
+            )
+
+        if est_name in {"rf", "random_forest", "randomforest"}:
+            rf_cfg = bcfg.get("bucket_rf", {})
+            return RandomForestClassifier(
+                n_estimators=rf_cfg.get("n_estimators", 200),
+                max_depth=rf_cfg.get("max_depth", None),
+                n_jobs=rf_cfg.get("n_jobs", -1),
+                random_state=rf_cfg.get("random_state", 42),
+            )
+
+        if est_name in {"xgb", "xgboost"}:
+            if not _XGB_AVAILABLE:
+                raise RuntimeError("配置了 bucket_estimator='xgb'，但未安装 xgboost 库")
+            xgb_cfg = bcfg.get("bucket_xgb", {})
+            return XGBClassifier(
+                n_estimators=xgb_cfg.get("n_estimators", 200),
+                max_depth=xgb_cfg.get("max_depth", 3),
+                learning_rate=xgb_cfg.get("learning_rate", 0.1),
+                subsample=xgb_cfg.get("subsample", 0.8),
+                colsample_bytree=xgb_cfg.get("colsample_bytree", 0.8),
+                reg_lambda=xgb_cfg.get("reg_lambda", 1.0),
+                n_jobs=xgb_cfg.get("n_jobs", -1),
+                random_state=xgb_cfg.get("random_state", 42),
+            )
+
+        if est_name in {"nb", "gnb", "naive_bayes", "naivebayes"}:
+            return GaussianNB()
+
+        log_info(f"【BTTWD】未知的 bucket_estimator='{est_name}'，回退到 logreg")
+        return LogisticRegression(
+            max_iter=bcfg.get("logreg_max_iter", 200), C=bcfg.get("logreg_C", 1.0)
+        )
 
     def _build_global_estimator(self):
         """构建全局后验估计器（例如 XGB）。"""
@@ -81,6 +127,11 @@ class BTTWDModel:
         est_name = bcfg.get("global_estimator", None)
         if est_name is None:
             est_name = bcfg.get("bucket_estimator", bcfg.get("posterior_estimator", "logreg"))
+
+        est_name = str(est_name).lower() if est_name is not None else "logreg"
+
+        if est_name in {"none", "no", "null", "disabled"}:
+            est_name = "logreg"
 
         if est_name == "xgb":
             if not _XGB_AVAILABLE:
@@ -99,7 +150,8 @@ class BTTWDModel:
                 use_label_encoder=False,
             )
 
-        return self._build_bucket_estimator()
+        # 其余情况沿用桶内模型配置
+        return self._build_bucket_estimator(est_name)
 
     def _find_model_with_backoff(self, bucket_id: str):
         """逐级回退查找桶模型。"""
@@ -165,6 +217,8 @@ class BTTWDModel:
         else:
             inner_train_idx = np.arange(len(y))
             inner_val_idx = np.array([], dtype=int)
+
+        self.bucket_estimator = self._build_bucket_estimator()
 
         inner_train_idx = np.asarray(inner_train_idx)
         inner_val_idx = np.asarray(inner_val_idx)
@@ -237,6 +291,9 @@ class BTTWDModel:
         self.bucket_models = {}
         self.bucket_thresholds = {}
 
+        if self.bucket_estimator is None:
+            log_info("【BTTWD】bucket_estimator=none：不训练桶内局部模型，仅使用全局模型概率做桶内阈值搜索")
+
         for bucket_id, idx_all in leaf_index_map.items():
             idx_all = np.asarray(idx_all)
             y_all = y[idx_all]
@@ -253,12 +310,15 @@ class BTTWDModel:
             record = self.bucket_stats[bucket_id]
 
             if len(y_train_bucket) < self.min_bucket_size or np.unique(y_train_bucket).size < 2:
-                log_info(f"【BTTWD】叶子桶 {bucket_id} 训练样本不足或单类，跳过局部模型训练")
+                log_info(f"【BTTWD】叶子桶 {bucket_id} 训练样本不足或单类，使用父桶/全局阈值")
                 record["use_parent_threshold"] = True
                 continue
 
-            model = self._build_bucket_estimator()
-            model.fit(X[train_idx_bucket], y_train_bucket)
+            model = None
+            if self.bucket_estimator is not None:
+                model = self._build_bucket_estimator()
+                model.fit(X[train_idx_bucket], y_train_bucket)
+                self.bucket_models[bucket_id] = model
 
             if (
                 len(idx_all) < self.min_samples_for_thresholds
@@ -266,13 +326,14 @@ class BTTWDModel:
                 or np.unique(y_val_bucket).size < 2
             ):
                 record["use_parent_threshold"] = True
-                self.bucket_models[bucket_id] = model
                 continue
 
-            proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
+            if model is None:
+                proba_val = self.global_model.predict_proba(X[val_idx_bucket])[:, 1]
+            else:
+                proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
             alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
 
-            self.bucket_models[bucket_id] = model
             self.bucket_thresholds[bucket_id] = (alpha, beta)
 
             record.update(
@@ -333,12 +394,15 @@ class BTTWDModel:
                 self.bucket_stats[parent_id] = record
 
             if len(y_train_bucket) < self.min_bucket_size or np.unique(y_train_bucket).size < 2:
-                log_info(f"【BTTWD】父桶 {parent_id} 训练样本不足或单类，跳过局部模型训练")
+                log_info(f"【BTTWD】父桶 {parent_id} 训练样本不足或单类，使用父桶/全局阈值")
                 record["use_parent_threshold"] = True
                 continue
 
-            model = self._build_bucket_estimator()
-            model.fit(X[train_idx_bucket], y_train_bucket)
+            model = None
+            if self.bucket_estimator is not None:
+                model = self._build_bucket_estimator()
+                model.fit(X[train_idx_bucket], y_train_bucket)
+                self.bucket_models[parent_id] = model
 
             if (
                 len(idx_all) < self.min_samples_for_thresholds
@@ -346,13 +410,14 @@ class BTTWDModel:
                 or np.unique(y_val_bucket).size < 2
             ):
                 record["use_parent_threshold"] = True
-                self.bucket_models[parent_id] = model
                 continue
 
-            proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
+            if model is None:
+                proba_val = self.global_model.predict_proba(X[val_idx_bucket])[:, 1]
+            else:
+                proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
             alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
 
-            self.bucket_models[parent_id] = model
             self.bucket_thresholds[parent_id] = (alpha, beta)
 
             record.update(
@@ -423,12 +488,20 @@ class BTTWDModel:
             )
 
         log_info(
-            f"【BTTWD】共生成 {bucket_ids.nunique()} 个叶子桶，其中有效桶 {len(self.bucket_models)} 个（样本数 ≥ {self.min_bucket_size}）"
+            "【BTTWD】共生成 "
+            f"{bucket_ids.nunique()} 个叶子桶，其中有效桶 {len(self.bucket_models)} 个（样本数 ≥ {self.min_bucket_size}）"
         )
 
     def predict_proba(self, X: np.ndarray, X_df_for_bucket: pd.DataFrame) -> np.ndarray:
         bucket_ids = self.bucket_tree.assign_buckets(X_df_for_bucket)
         proba = np.zeros(len(X))
+
+        if self.bucket_estimator is None:
+            if self.global_model is not None:
+                proba = self.global_model.predict_proba(X)[:, 1]
+            else:
+                proba.fill(self.global_pos_rate)
+            return proba
 
         for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
             model, _ = self._find_model_with_backoff(bucket_id)
