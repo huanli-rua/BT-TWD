@@ -3,7 +3,6 @@ import pandas as pd
 from collections import defaultdict
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import f1_score, balanced_accuracy_score
 from sklearn.model_selection import StratifiedShuffleSplit
 
 try:
@@ -16,6 +15,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 from .bucket_rules import get_parent_bucket_id
 from .utils_logging import log_info
+from .threshold_search import search_thresholds_with_regret, compute_regret
 
 
 class BTTWDModel:
@@ -25,6 +25,7 @@ class BTTWDModel:
 
         bcfg = cfg.get("BTTWD", {})
         data_cfg = cfg.get("DATA", {})
+        thresh_cfg = cfg.get("THRESHOLDS", {})
 
         self.min_bucket_size = bcfg.get("min_bucket_size", 50)
         self.parent_share_rate = bcfg.get("parent_share_rate", 0.0)
@@ -32,18 +33,34 @@ class BTTWDModel:
         self.val_ratio = bcfg.get("val_ratio", 0.2)
         self.min_val_samples_per_bucket = bcfg.get("min_val_samples_per_bucket", 10)
         self.use_global_backoff = bcfg.get("use_global_backoff", True)
-        self.optimize_thresholds = bcfg.get("optimize_thresholds", True)
-        self.threshold_obj = bcfg.get("threshold_obj", bcfg.get("threshold_objective", "F1"))
-        threshold_grid_cfg = bcfg.get("threshold_grid", bcfg.get("threshold_search_grid", {}))
-        self.threshold_grid_alpha = threshold_grid_cfg.get("alpha", [])
-        self.threshold_grid_beta = threshold_grid_cfg.get("beta", [])
-        self.global_alpha = bcfg.get("alpha_init", 0.6)
-        self.global_beta = bcfg.get("beta_init", 0.3)
+        self.optimize_thresholds = True
+        self.threshold_mode = thresh_cfg.get("mode", bcfg.get("thresholds_mode", "bucket_wise"))
+        self.threshold_objective = thresh_cfg.get("objective", "regret")
+        self.threshold_grid_alpha = thresh_cfg.get("alpha_grid", [])
+        self.threshold_grid_beta = thresh_cfg.get("beta_grid", [])
+        self.gap_min = thresh_cfg.get("gap_min", 0.0)
+        self.costs = thresh_cfg.get(
+            "costs",
+            {
+                "C_TP": 0.0,
+                "C_TN": 0.0,
+                "C_FP": 1.0,
+                "C_FN": 3.0,
+                "C_BP": 1.5,
+                "C_BN": 0.5,
+            },
+        )
+        self.global_alpha = thresh_cfg.get("alpha_init", 0.6)
+        self.global_beta = thresh_cfg.get("beta_init", 0.2)
+        self.min_samples_for_thresholds = thresh_cfg.get(
+            "min_samples_for_thresholds", bcfg.get("min_val_samples_per_bucket", 10)
+        )
         self.random_state = data_cfg.get("random_state", 42)
 
         self.bucket_models = {}
         self.bucket_thresholds = {}
         self.bucket_stats = {}
+        self.threshold_logs = []
         self.global_model = None
         self.global_pos_rate = 0.5
         self.rng = np.random.default_rng(self.random_state)
@@ -99,23 +116,44 @@ class BTTWDModel:
         grid_alpha = self.threshold_grid_alpha or [self.global_alpha]
         grid_beta = self.threshold_grid_beta or [self.global_beta]
 
-        best_alpha = self.global_alpha
-        best_beta = self.global_beta
-        best_score = -np.inf
+        alpha, beta, stats = search_thresholds_with_regret(
+            proba,
+            y_true,
+            alpha_grid=grid_alpha,
+            beta_grid=grid_beta,
+            costs=self.costs,
+            gap_min=self.gap_min,
+        )
+        return alpha, beta, stats
 
-        for alpha in grid_alpha:
-            for beta in grid_beta:
-                if alpha < beta:
-                    continue
-                y_tmp = np.where(proba >= alpha, 1, np.where(proba <= beta, 0, 0))
-                if self.threshold_obj.upper() == "BAC":
-                    score = balanced_accuracy_score(y_true, y_tmp)
-                else:
-                    score = f1_score(y_true, y_tmp)
-                if score > best_score:
-                    best_score = score
-                    best_alpha, best_beta = alpha, beta
-        return best_alpha, best_beta, best_score
+    def _get_threshold_with_backoff(self, bucket_id: str):
+        parts = bucket_id.split("|")
+        for end in range(len(parts), 0, -1):
+            candidate = "|".join(parts[:end])
+            if candidate in self.bucket_thresholds:
+                return self.bucket_thresholds[candidate], candidate
+        return (self.global_alpha, self.global_beta), None
+
+    def _init_bucket_record(self, bucket_id, parent_id, train_idx, val_idx, y):
+        return {
+            "bucket_id": bucket_id,
+            "layer": f"L{len(bucket_id.split('|'))}",
+            "parent_bucket_id": parent_id if parent_id is not None else "",
+            "n_train": int(len(train_idx)),
+            "n_val": int(len(val_idx)),
+            "pos_rate_train": float(y[train_idx].mean()) if len(train_idx) else float("nan"),
+            "pos_rate_val": float(y[val_idx].mean()) if len(val_idx) else float("nan"),
+            "alpha": float("nan"),
+            "beta": float("nan"),
+            "regret_val": float("nan"),
+            "F1_val": float("nan"),
+            "Precision_val": float("nan"),
+            "Recall_val": float("nan"),
+            "BND_ratio_val": float("nan"),
+            "pos_coverage_val": float("nan"),
+            "use_parent_threshold": False,
+            "threshold_n_samples": 0,
+        }
 
     def fit(self, X: np.ndarray, y: np.ndarray, X_df_for_bucket: pd.DataFrame):
         # Step 0: 划分 inner 训练/验证集
@@ -139,6 +177,8 @@ class BTTWDModel:
 
         leaf_index_map = {}
         parent_index_map = defaultdict(list)
+        self.bucket_stats = {}
+        self.threshold_logs = []
 
         for bucket_id, g in df_buckets.groupby("bucket_id"):
             idx_all = g["idx"].to_numpy()
@@ -146,8 +186,19 @@ class BTTWDModel:
             n_bucket = len(idx_all)
 
             parent_id = get_parent_bucket_id(bucket_id)
+            train_mask = np.isin(idx_all, inner_train_idx)
+            val_mask = np.isin(idx_all, inner_val_idx)
+            train_idx_bucket = idx_all[train_mask]
+            val_idx_bucket = idx_all[val_mask]
+
+            self.bucket_stats[bucket_id] = {
+                **self._init_bucket_record(bucket_id, parent_id, train_idx_bucket, val_idx_bucket, y),
+                "n_all": int(n_bucket),
+                "pos_rate_all": float(y_bucket.mean()) if n_bucket else float("nan"),
+            }
 
             if n_bucket < self.min_bucket_size:
+                self.bucket_stats[bucket_id]["use_parent_threshold"] = True
                 if parent_id is not None:
                     parent_index_map[parent_id].extend(idx_all.tolist())
                     log_info(
@@ -185,7 +236,6 @@ class BTTWDModel:
         # Step 3: 训练父桶模型
         self.bucket_models = {}
         self.bucket_thresholds = {}
-        self.bucket_stats = {}
 
         for parent_id, idx_list in parent_index_map.items():
             idx_all = np.array(sorted(set(idx_list)))
@@ -200,39 +250,71 @@ class BTTWDModel:
             y_train_bucket = y[train_idx_bucket]
             y_val_bucket = y[val_idx_bucket]
 
+            record = self.bucket_stats.get(parent_id)
+            if record is None:
+                record = self._init_bucket_record(parent_id, get_parent_bucket_id(parent_id), train_idx_bucket, val_idx_bucket, y)
+                record["n_all"] = int(len(idx_all))
+                record["pos_rate_all"] = float(y_all.mean()) if len(y_all) else float("nan")
+                self.bucket_stats[parent_id] = record
+
             if len(y_train_bucket) < self.min_bucket_size or np.unique(y_train_bucket).size < 2:
                 log_info(f"【BTTWD】父桶 {parent_id} 训练样本不足或单类，跳过局部模型训练")
+                record["use_parent_threshold"] = True
                 continue
 
             model = self._build_bucket_estimator()
             model.fit(X[train_idx_bucket], y_train_bucket)
 
-            use_full_bucket_for_threshold = False
             if (
-                len(val_idx_bucket) >= self.min_val_samples_per_bucket
-                and np.unique(y_val_bucket).size >= 2
+                len(idx_all) < self.min_samples_for_thresholds
+                or len(val_idx_bucket) < self.min_val_samples_per_bucket
+                or np.unique(y_val_bucket).size < 2
             ):
-                proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
-                alpha, beta, score = self._search_thresholds(proba_val, y_val_bucket)
-            else:
-                proba_all = model.predict_proba(X[idx_all])[:, 1]
-                alpha, beta, score = self._search_thresholds(proba_all, y_all)
-                use_full_bucket_for_threshold = True
+                record["use_parent_threshold"] = True
+                self.bucket_models[parent_id] = model
+                continue
+
+            proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
+            alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
 
             self.bucket_models[parent_id] = model
             self.bucket_thresholds[parent_id] = (alpha, beta)
-            self.bucket_stats[parent_id] = {
-                "bucket_id": parent_id,
-                "level": "parent",
-                "n_samples_all": int(len(idx_all)),
-                "n_samples_train": int(len(train_idx_bucket)),
-                "n_samples_val": int(len(val_idx_bucket)),
-                "pos_rate": float(y_all.mean()),
-                "alpha": float(alpha),
-                "beta": float(beta),
-                "threshold_score": float(score),
-                "use_full_bucket_for_threshold": bool(use_full_bucket_for_threshold),
-            }
+
+            record.update(
+                {
+                    "alpha": float(alpha),
+                    "beta": float(beta),
+                    "regret_val": float(stats.get("regret", np.nan)),
+                    "F1_val": float(stats.get("f1", np.nan)),
+                    "Precision_val": float(stats.get("precision", np.nan)),
+                    "Recall_val": float(stats.get("recall", np.nan)),
+                    "BND_ratio_val": float(stats.get("bnd_ratio", np.nan)),
+                    "pos_coverage_val": float(stats.get("pos_coverage", np.nan)),
+                    "threshold_n_samples": int(stats.get("n_samples", 0)),
+                }
+            )
+
+            self.threshold_logs.append(
+                {
+                    "bucket_id": parent_id,
+                    "layer": record.get("layer"),
+                    "parent_bucket_id": record.get("parent_bucket_id", ""),
+                    "n_train": record.get("n_train", 0),
+                    "n_val": record.get("n_val", 0),
+                    "pos_rate_train": record.get("pos_rate_train"),
+                    "pos_rate_val": record.get("pos_rate_val"),
+                    "alpha": record.get("alpha"),
+                    "beta": record.get("beta"),
+                    "regret_val": record.get("regret_val"),
+                    "F1_val": record.get("F1_val"),
+                    "Precision_val": record.get("Precision_val"),
+                    "Recall_val": record.get("Recall_val"),
+                    "BND_ratio_val": record.get("BND_ratio_val"),
+                    "pos_coverage_val": record.get("pos_coverage_val"),
+                    "threshold_n_samples": record.get("threshold_n_samples", 0),
+                    "use_parent_threshold": record.get("use_parent_threshold", False),
+                }
+            )
 
         # Step 4: 训练叶子桶模型
         for bucket_id, idx_all in leaf_index_map.items():
@@ -248,39 +330,97 @@ class BTTWDModel:
             y_train_bucket = y[train_idx_bucket]
             y_val_bucket = y[val_idx_bucket]
 
+            record = self.bucket_stats[bucket_id]
+
             if len(y_train_bucket) < self.min_bucket_size or np.unique(y_train_bucket).size < 2:
                 log_info(f"【BTTWD】叶子桶 {bucket_id} 训练样本不足或单类，跳过局部模型训练")
+                record["use_parent_threshold"] = True
                 continue
 
             model = self._build_bucket_estimator()
             model.fit(X[train_idx_bucket], y_train_bucket)
 
-            use_full_bucket_for_threshold = False
             if (
-                len(val_idx_bucket) >= self.min_val_samples_per_bucket
-                and np.unique(y_val_bucket).size >= 2
+                len(idx_all) < self.min_samples_for_thresholds
+                or len(val_idx_bucket) < self.min_val_samples_per_bucket
+                or np.unique(y_val_bucket).size < 2
             ):
-                proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
-                alpha, beta, score = self._search_thresholds(proba_val, y_val_bucket)
-            else:
-                proba_all = model.predict_proba(X[idx_all])[:, 1]
-                alpha, beta, score = self._search_thresholds(proba_all, y_all)
-                use_full_bucket_for_threshold = True
+                record["use_parent_threshold"] = True
+                self.bucket_models[bucket_id] = model
+                continue
+
+            proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
+            alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
 
             self.bucket_models[bucket_id] = model
             self.bucket_thresholds[bucket_id] = (alpha, beta)
-            self.bucket_stats[bucket_id] = {
-                "bucket_id": bucket_id,
-                "level": "leaf",
-                "n_samples_all": int(len(idx_all)),
-                "n_samples_train": int(len(train_idx_bucket)),
-                "n_samples_val": int(len(val_idx_bucket)),
-                "pos_rate": float(y_all.mean()),
-                "alpha": float(alpha),
-                "beta": float(beta),
-                "threshold_score": float(score),
-                "use_full_bucket_for_threshold": bool(use_full_bucket_for_threshold),
-            }
+
+            record.update(
+                {
+                    "alpha": float(alpha),
+                    "beta": float(beta),
+                    "regret_val": float(stats.get("regret", np.nan)),
+                    "F1_val": float(stats.get("f1", np.nan)),
+                    "Precision_val": float(stats.get("precision", np.nan)),
+                    "Recall_val": float(stats.get("recall", np.nan)),
+                    "BND_ratio_val": float(stats.get("bnd_ratio", np.nan)),
+                    "pos_coverage_val": float(stats.get("pos_coverage", np.nan)),
+                    "threshold_n_samples": int(stats.get("n_samples", 0)),
+                }
+            )
+
+            self.threshold_logs.append(
+                {
+                    "bucket_id": bucket_id,
+                    "layer": record.get("layer"),
+                    "parent_bucket_id": record.get("parent_bucket_id", ""),
+                    "n_train": record.get("n_train", 0),
+                    "n_val": record.get("n_val", 0),
+                    "pos_rate_train": record.get("pos_rate_train"),
+                    "pos_rate_val": record.get("pos_rate_val"),
+                    "alpha": record.get("alpha"),
+                    "beta": record.get("beta"),
+                    "regret_val": record.get("regret_val"),
+                    "F1_val": record.get("F1_val"),
+                    "Precision_val": record.get("Precision_val"),
+                    "Recall_val": record.get("Recall_val"),
+                    "BND_ratio_val": record.get("BND_ratio_val"),
+                    "pos_coverage_val": record.get("pos_coverage_val"),
+                    "threshold_n_samples": record.get("threshold_n_samples", 0),
+                    "use_parent_threshold": record.get("use_parent_threshold", False),
+                }
+            )
+
+        # 对未单独训练阈值的桶补充日志（继承父桶或全局阈值）
+        for bucket_id, record in self.bucket_stats.items():
+            if any(log["bucket_id"] == bucket_id for log in self.threshold_logs):
+                continue
+            record["use_parent_threshold"] = True
+            (alpha, beta), parent_with_threshold = self._get_threshold_with_backoff(bucket_id)
+            record["alpha"] = float(alpha)
+            record["beta"] = float(beta)
+            self.threshold_logs.append(
+                {
+                    "bucket_id": bucket_id,
+                    "layer": record.get("layer"),
+                    "parent_bucket_id": record.get("parent_bucket_id", ""),
+                    "n_train": record.get("n_train", 0),
+                    "n_val": record.get("n_val", 0),
+                    "pos_rate_train": record.get("pos_rate_train"),
+                    "pos_rate_val": record.get("pos_rate_val"),
+                    "alpha": float(alpha),
+                    "beta": float(beta),
+                    "regret_val": record.get("regret_val"),
+                    "F1_val": record.get("F1_val"),
+                    "Precision_val": record.get("Precision_val"),
+                    "Recall_val": record.get("Recall_val"),
+                    "BND_ratio_val": record.get("BND_ratio_val"),
+                    "pos_coverage_val": record.get("pos_coverage_val"),
+                    "threshold_n_samples": record.get("threshold_n_samples", 0),
+                    "use_parent_threshold": True,
+                    "parent_with_threshold": parent_with_threshold if parent_with_threshold else "",
+                }
+            )
 
         log_info(
             f"【BTTWD】共生成 {bucket_ids.nunique()} 个叶子桶，其中有效桶 {len(self.bucket_models)} 个（样本数 ≥ {self.min_bucket_size}）"
@@ -291,7 +431,7 @@ class BTTWDModel:
         proba = np.zeros(len(X))
 
         for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
-            model, matched_bucket_id = self._find_model_with_backoff(bucket_id)
+            model, _ = self._find_model_with_backoff(bucket_id)
 
             if model is None:
                 if self.use_global_backoff and self.global_model is not None:
@@ -309,11 +449,7 @@ class BTTWDModel:
 
         preds = np.zeros(len(proba))
         for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
-            _, matched_bucket_id = self._find_model_with_backoff(bucket_id)
-            if matched_bucket_id is not None and matched_bucket_id in self.bucket_thresholds:
-                alpha, beta = self.bucket_thresholds.get(matched_bucket_id, (self.global_alpha, self.global_beta))
-            else:
-                alpha, beta = self.global_alpha, self.global_beta
+            (alpha, beta), _ = self._get_threshold_with_backoff(bucket_id)
 
             bucket_proba = proba[list(idxs)]
             bucket_pred = np.where(bucket_proba >= alpha, 1, np.where(bucket_proba <= beta, 0, -1))
@@ -324,4 +460,12 @@ class BTTWDModel:
         if not self.bucket_stats:
             return pd.DataFrame()
         df = pd.DataFrame(self.bucket_stats.values())
-        return df.sort_values(by="n_samples_all", ascending=False)
+        sort_col = "n_all" if "n_all" in df.columns else None
+        if sort_col:
+            df = df.sort_values(by=sort_col, ascending=False)
+        return df
+
+    def get_threshold_logs(self) -> pd.DataFrame:
+        if not self.threshold_logs:
+            return pd.DataFrame()
+        return pd.DataFrame(self.threshold_logs)
