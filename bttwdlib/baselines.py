@@ -84,7 +84,6 @@ def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter) -> 
     X = _make_writable_matrix(X)
     y = _make_writable_vector(y)
 
-    costs = cfg.get("THRESHOLDS", {}).get("costs", {})
     metrics_cfg = cfg.get("METRICS", {})
 
     per_fold_records: list[dict] = []
@@ -108,14 +107,7 @@ def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter) -> 
         else:
             y_score = np.zeros_like(y_pred, dtype=float)
 
-        if costs:
-            y_pred_binary = predict_binary_by_cost(y_score, costs)
-        else:
-            y_pred_binary = y_pred
-
-        metrics_dict = compute_binary_metrics(
-            y[test_idx], y_pred_binary, y_score, metrics_cfg, costs=costs or None
-        )
+        metrics_dict = compute_binary_metrics(y[test_idx], y_pred, y_score, metrics_cfg)
         metrics_dict.setdefault("BND_ratio", 0.0)
         metrics_dict.setdefault("POS_Coverage", float("nan"))
         metrics_dict["fold"] = fold_idx
