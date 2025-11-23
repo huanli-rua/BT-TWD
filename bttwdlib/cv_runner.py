@@ -63,13 +63,13 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
         y_pred_binary = np.where(y_pred_s3 == 1, 1, 0)
 
         metrics_binary = compute_binary_metrics(
-            y_test, y_pred_binary, y_score, cfg.get("METRICS", {}), costs=threshold_costs
+            y_test, y_pred_binary, y_score, cfg.get("METRICS", {}), costs=None
         )
         metrics_s3 = compute_s3_metrics(y_test, y_pred_s3, y_score, cfg.get("METRICS", {}), costs=threshold_costs)
         log_metrics("【BTTWD】三支指标(含后悔)：", metrics_s3)
 
-        fold_record = {"fold": fold_idx, "model": "BTTWD", **metrics_binary}
-        for k, v in metrics_s3.items():
+        fold_record = {"fold": fold_idx, "model": "BTTWD", **metrics_s3}
+        for k, v in metrics_binary.items():
             if k not in fold_record:
                 fold_record[k] = v
         per_fold_records.append(fold_record)
