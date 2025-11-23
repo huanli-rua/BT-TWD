@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover - optional dependency
     XGBClassifier = None
     _XGB_AVAILABLE = False
 
-from .metrics import compute_binary_metrics, log_metrics
+from .metrics import compute_binary_metrics, log_metrics, predict_binary_by_cost
 from .utils_logging import log_info
 
 
@@ -108,7 +108,14 @@ def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter) -> 
         else:
             y_score = np.zeros_like(y_pred, dtype=float)
 
-        metrics_dict = compute_binary_metrics(y[test_idx], y_pred, y_score, metrics_cfg, costs=costs)
+        if costs:
+            y_pred_binary = predict_binary_by_cost(y_score, costs)
+        else:
+            y_pred_binary = y_pred
+
+        metrics_dict = compute_binary_metrics(
+            y[test_idx], y_pred_binary, y_score, metrics_cfg, costs=costs or None
+        )
         metrics_dict.setdefault("BND_ratio", 0.0)
         metrics_dict.setdefault("POS_Coverage", float("nan"))
         metrics_dict["fold"] = fold_idx

@@ -11,7 +11,12 @@ from .baselines import (
     train_eval_random_forest,
     train_eval_xgboost,
 )
-from .metrics import compute_binary_metrics, compute_s3_metrics, log_metrics
+from .metrics import (
+    compute_binary_metrics,
+    compute_s3_metrics,
+    log_metrics,
+    predict_binary_by_cost,
+)
 from .threshold_search import compute_regret
 from .utils_logging import log_info
 
@@ -60,10 +65,13 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
 
         y_score = bttwd_model.predict_proba(X_test, X_df_test)
         y_pred_s3 = bttwd_model.predict(X_test, X_df_test)
-        y_pred_binary = np.where(y_pred_s3 == 1, 1, 0)
+        if threshold_costs:
+            y_pred_binary = predict_binary_by_cost(y_score, threshold_costs)
+        else:
+            y_pred_binary = np.where(y_pred_s3 == 1, 1, 0)
 
         metrics_binary = compute_binary_metrics(
-            y_test, y_pred_binary, y_score, cfg.get("METRICS", {}), costs=None
+            y_test, y_pred_binary, y_score, cfg.get("METRICS", {}), costs=threshold_costs or None
         )
         metrics_s3 = compute_s3_metrics(y_test, y_pred_s3, y_score, cfg.get("METRICS", {}), costs=threshold_costs)
         log_metrics("【BTTWD】三支指标(含后悔)：", metrics_s3)
