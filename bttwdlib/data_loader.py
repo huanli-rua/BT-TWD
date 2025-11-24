@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 from scipy.io import arff
 from .utils_logging import log_info
@@ -97,12 +99,15 @@ def _apply_target_transform(df: pd.DataFrame, data_cfg: dict) -> tuple[pd.DataFr
 
 
 def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
-    """根据配置加载数据集，支持 adult CSV 和 ARFF 等格式。"""
+    """根据配置加载数据集，支持 adult CSV、ARFF 以及多种表格格式。"""
 
     data_cfg = cfg.get("DATA", {})
-    file_type = str(data_cfg.get("file_type", "csv")).lower()
-    dataset_name = data_cfg.get("dataset_name", "dataset")
     raw_path = data_cfg.get("raw_path") or data_cfg.get("path")
+    file_type_cfg = data_cfg.get("file_type")
+    file_type = str(file_type_cfg).lower() if file_type_cfg is not None else ""
+    if not file_type and raw_path:
+        file_type = Path(raw_path).suffix.lower().lstrip(".") or "csv"
+    dataset_name = data_cfg.get("dataset_name", "dataset")
 
     if raw_path is None:
         raise FileNotFoundError("配置中缺少 raw_path/path 字段，无法读取数据")
