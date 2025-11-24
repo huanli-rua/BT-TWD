@@ -7,9 +7,13 @@ from sklearn.pipeline import Pipeline
 from .utils_logging import log_info
 
 
-def _infer_columns(df: pd.DataFrame, target_col: str):
-    continuous_cols = df.drop(columns=[target_col]).select_dtypes(include=["number"]).columns.tolist()
-    categorical_cols = df.drop(columns=[target_col]).select_dtypes(exclude=["number"]).columns.tolist()
+def _infer_columns(df: pd.DataFrame, target_col: str, extra_excludes: list | None = None):
+    excludes = {target_col}
+    if extra_excludes:
+        excludes.update(extra_excludes)
+    df_no_target = df.drop(columns=list(excludes), errors="ignore")
+    continuous_cols = df_no_target.select_dtypes(include=["number"]).columns.tolist()
+    categorical_cols = df_no_target.select_dtypes(exclude=["number"]).columns.tolist()
     return continuous_cols, categorical_cols
 
 
@@ -46,7 +50,9 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
         or []
     )
     if not continuous_cols and not categorical_cols:
-        continuous_cols, categorical_cols = _infer_columns(df, target_col_for_model)
+        continuous_cols, categorical_cols = _infer_columns(
+            df, target_col_for_model, extra_excludes=[target_col]
+        )
     log_info(f"【预处理】连续特征={len(continuous_cols)}个，类别特征={len(categorical_cols)}个")
 
     y = (df[target_col_for_model] == positive_label).astype(int).values
