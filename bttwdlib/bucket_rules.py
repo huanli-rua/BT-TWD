@@ -8,26 +8,40 @@ class BucketTree:
         self.feature_names = feature_names
 
     def _assign_single_level(self, series: pd.Series, level_cfg: dict) -> pd.Series:
-        if level_cfg.get("type") == "numeric_bin":
+        level_type = str(level_cfg.get("type", "")).lower()
+        if level_type in {"numeric_bin", "numeric_binning"}:
             bins = level_cfg.get("bins", [])
             labels = level_cfg.get("labels")
             cut_bins = [-float("inf")] + bins + [float("inf")]
+            n_intervals = len(cut_bins) - 1
             if labels is None:
-                labels = [f"bin_{i}" for i in range(len(cut_bins) - 1)]
+                labels = [f"bin_{i}" for i in range(n_intervals)]
+            elif len(labels) != n_intervals:
+                raise ValueError(
+                    f"numeric_bin labels length {len(labels)} does not match interval count {n_intervals}"
+                )
             return pd.cut(series, bins=cut_bins, labels=labels, include_lowest=True)
-        if level_cfg.get("type") == "categorical_group":
-            mapping = {}
-            groups = level_cfg.get("groups", {})
-            for group_name, values in groups.items():
-                for v in values:
-                    mapping[v] = group_name
-            return series.map(mapping).fillna("unknown")
+        if level_type == "categorical_group":
+            other_label = level_cfg.get("other_label", "OTHER")
+            groups = level_cfg.get("groups")
+            if groups:
+                mapping = {}
+                for group_name, values in groups.items():
+                    for v in values:
+                        mapping[v] = group_name
+                return series.map(mapping).fillna(other_label)
+            min_count = level_cfg.get("min_count")
+            if min_count is not None:
+                value_counts = series.value_counts()
+                popular_values = set(value_counts[value_counts >= min_count].index)
+                return series.apply(lambda v: v if v in popular_values else other_label)
+            return series.fillna(other_label)
         return pd.Series(["unknown"] * len(series), index=series.index)
 
     def assign_buckets(self, X_df: pd.DataFrame) -> pd.Series:
         bucket_parts = []
         for level_cfg in self.levels_cfg:
-            col = level_cfg.get("col")
+            col = level_cfg.get("col") or level_cfg.get("feature")
             part = self._assign_single_level(X_df[col], level_cfg)
             unknown_mask = part.isna()
             if unknown_mask.any():
