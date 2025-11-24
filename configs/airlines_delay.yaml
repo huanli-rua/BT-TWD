@@ -107,7 +107,7 @@ BTTWD:
   bucket_estimator: "knn"                                        # 桶内模型类型（KNN）
   posterior_estimator: "logreg"                                  # 后验估计或校准模型
   logreg_C: 1.0                                                  # 逻辑回归正则系数
-  knn_k: 50                                                      # KNN 邻居数
+  knn_k: 10                                                      # KNN 邻居数
   knn_weights: "distance"                                        # KNN 距离加权策略
   bucket_rf:                                                     # 桶内随机森林参数占位（当前未启用）
     n_estimators: 200
@@ -138,8 +138,8 @@ THRESHOLDS:
   objective: "regret"                                           # 优化指标（与 adult 保持一致）
   alpha_init: 0.6                                                # 正类阈值初始值
   beta_init: 0.4                                                 # 负类阈值初始值
-  alpha_grid: [0.5, 0.55, 0.6, 0.65, 0.7]                        # α 搜索网格
-  beta_grid: [0.2, 0.3, 0.4, 0.45, 0.5]                          # β 搜索网格
+  alpha_grid: [0.2,0.25,0.3,0.35,0.4,0.45,0.5, 0.55, 0.6, 0.65, 0.7,0.75, 0.8, 0.85, 0.9, 0.95]                        # α 搜索网格
+  beta_grid: [0.05,0.1,0.15,0.2,0.25, 0.3,0.35, 0.4, 0.45, 0.5]                          # β 搜索网格
   gap_min: 0.05                                                  # α、β 最小间隔
   costs:                                                         # 三支决策成本
     C_TP: 0.0                                                    # 真正类成本
