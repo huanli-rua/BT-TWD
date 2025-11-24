@@ -81,7 +81,11 @@ class BTTWDModel:
             return None
 
         if est_name == "knn":
-            return KNeighborsClassifier(n_neighbors=bcfg.get("knn_k", 10))
+            return KNeighborsClassifier(
+                n_neighbors=bcfg.get("knn_k", 10),
+                weights=bcfg.get("knn_weights", "uniform"),
+                n_jobs=bcfg.get("knn_jobs", -1),
+            )
 
         if est_name in {"logreg", "lr", "logistic", "logistic_regression"}:
             return LogisticRegression(
@@ -158,7 +162,11 @@ class BTTWDModel:
             )
 
         if est_name == "knn":
-            return KNeighborsClassifier(n_neighbors=bcfg.get("knn_k", 10))
+            return KNeighborsClassifier(
+                n_neighbors=bcfg.get("knn_k", 10),
+                weights=bcfg.get("knn_weights", "uniform"),
+                n_jobs=bcfg.get("knn_jobs", -1),
+            )
 
         if est_name in {"nb", "gnb", "naive_bayes", "naivebayes"}:
             return GaussianNB()

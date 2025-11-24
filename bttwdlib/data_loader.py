@@ -1,4 +1,5 @@
 import pandas as pd
+from scipy.io import arff
 from .utils_logging import log_info
 
 
@@ -42,3 +43,66 @@ def load_adult_raw(cfg: dict) -> pd.DataFrame:
         f"【数据加载完毕】样本数={total}，特征数={n_features}，正类比例={pos_rate:.2f}"
     )
     return df
+
+
+def _load_arff(path: str) -> pd.DataFrame:
+    data, meta = arff.loadarff(path)
+    df = pd.DataFrame(data)
+    # 将 bytes 类型的类别值解码为字符串
+    for col in df.columns:
+        if pd.api.types.is_object_dtype(df[col]):
+            df[col] = df[col].apply(lambda x: x.decode() if isinstance(x, (bytes, bytearray)) else x)
+    log_info(f"【数据加载】ARFF 文件 {path} 已读取，含 {df.shape[0]} 条记录，{df.shape[1]} 列")
+    return df
+
+
+def _apply_target_transform(df: pd.DataFrame, data_cfg: dict) -> tuple[pd.DataFrame, str]:
+    target_col = data_cfg.get("target_col")
+    transform_cfg = data_cfg.get("target_transform") or {}
+    if not transform_cfg:
+        return df, target_col
+
+    transform_type = transform_cfg.get("type")
+    if transform_type == "threshold_binary":
+        threshold = transform_cfg.get("threshold", 0.0)
+        greater_is_positive = transform_cfg.get("greater_is_positive", True)
+        new_col = transform_cfg.get("new_col", f"{target_col}_bin")
+        cmp = df[target_col] > threshold if greater_is_positive else df[target_col] < threshold
+        df[new_col] = cmp.astype(int)
+        log_info(
+            f"【目标变换】已按阈值 {threshold} 生成二分类标签列 {new_col}，正类取 {'>' if greater_is_positive else '<'} {threshold}"
+        )
+        return df, new_col
+
+    log_info(f"【目标变换】未识别的 target_transform.type={transform_type}，保持原目标列 {target_col}")
+    return df, target_col
+
+
+def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
+    """根据配置加载数据集，支持 adult CSV 和 ARFF 等格式。"""
+
+    data_cfg = cfg.get("DATA", {})
+    file_type = str(data_cfg.get("file_type", "csv")).lower()
+    dataset_name = data_cfg.get("dataset_name", "dataset")
+    raw_path = data_cfg.get("raw_path") or data_cfg.get("path")
+
+    if raw_path is None:
+        raise FileNotFoundError("配置中缺少 raw_path/path 字段，无法读取数据")
+
+    if file_type == "arff":
+        df = _load_arff(raw_path)
+    else:
+        df = load_adult_raw(cfg)
+
+    df, target_col = _apply_target_transform(df, data_cfg)
+
+    positive_label = data_cfg.get("positive_label")
+    if positive_label is not None and target_col in df.columns:
+        pos_rate = (df[target_col] == positive_label).mean()
+        log_info(
+            f"【数据集信息】名称={dataset_name}，样本数={len(df)}，目标列={target_col}，正类比例={pos_rate:.2%}"
+        )
+    else:
+        log_info(f"【数据集信息】名称={dataset_name}，样本数={len(df)}，目标列={target_col}")
+
+    return df, target_col

@@ -23,7 +23,10 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
     prep_cfg = cfg.get("PREPROCESS", {})
     data_cfg = cfg.get("DATA", {})
     target_col = data_cfg.get("target_col", "income")
+    target_transform = data_cfg.get("target_transform") or {}
+    target_col_for_model = target_transform.get("new_col", target_col)
     positive_label = data_cfg.get("positive_label", ">50K")
+    negative_label = data_cfg.get("negative_label")
 
     df = df.copy()
     # 缺失值统一处理
@@ -31,14 +34,30 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
         df.replace("?", np.nan, inplace=True)
 
     # 推断列
-    continuous_cols = prep_cfg.get("continuous_cols") or []
-    categorical_cols = prep_cfg.get("categorical_cols") or []
+    continuous_cols = (
+        prep_cfg.get("continuous_cols")
+        or prep_cfg.get("numeric")
+        or prep_cfg.get("numeric_cols")
+        or []
+    )
+    categorical_cols = (
+        prep_cfg.get("categorical_cols")
+        or prep_cfg.get("categorical")
+        or []
+    )
     if not continuous_cols and not categorical_cols:
-        continuous_cols, categorical_cols = _infer_columns(df, target_col)
+        continuous_cols, categorical_cols = _infer_columns(df, target_col_for_model)
     log_info(f"【预处理】连续特征={len(continuous_cols)}个，类别特征={len(categorical_cols)}个")
 
-    y = (df[target_col] == positive_label).astype(int).values
-    X_raw = df.drop(columns=[target_col])
+    y = (df[target_col_for_model] == positive_label).astype(int).values
+    if negative_label is not None:
+        y = np.where(df[target_col_for_model] == positive_label, 1, 0)
+    drop_cols = set(prep_cfg.get("drop_cols", []))
+    drop_cols.add(target_col_for_model)
+    source_target_col = data_cfg.get("target_col")
+    if source_target_col and source_target_col != target_col_for_model:
+        drop_cols.add(source_target_col)
+    X_raw = df.drop(columns=list(drop_cols), errors="ignore")
 
     transformers = []
     if categorical_cols:

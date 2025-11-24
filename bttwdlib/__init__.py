@@ -1,5 +1,5 @@
 from .config_loader import load_yaml_cfg, show_cfg, flatten_cfg_to_vars
-from .data_loader import load_adult_raw
+from .data_loader import load_adult_raw, load_dataset
 from .preprocessing import prepare_features_and_labels
 from .bucket_rules import BucketTree
 from .bttwd_model import BTTWDModel
@@ -14,6 +14,7 @@ __all__ = [
     "show_cfg",
     "flatten_cfg_to_vars",
     "load_adult_raw",
+    "load_dataset",
     "prepare_features_and_labels",
     "BucketTree",
     "BTTWDModel",
