@@ -156,15 +156,26 @@ BASELINES:
   use_random_forest: false                                       # 是否跑随机森林基线
   use_knn: true                                                  # 是否跑 KNN 基线
   use_xgboost: true                                              # 是否跑 XGBoost 基线
+
+  common:
+    threshold_mode: "per_model"                                  # "fixed" / "per_model"，默认 fixed
+    fixed_threshold: 0.5                                         # 全局默认阈值
+
   logreg:
     C: 1.0                                                       # 逻辑回归正则化强度
     max_iter: 500                                                # 最大迭代次数
+    use_custom_threshold: true
+    custom_threshold: 0.3
   random_forest:
     n_estimators: 200                                            # 随机森林树数
     max_depth: null                                              # 随机森林深度
     random_state: 42                                             # 随机种子
+    use_custom_threshold: true
+    custom_threshold: 0.4
   knn:
     n_neighbors: 50                                              # 基线 KNN 邻居数
+    use_custom_threshold: true
+    custom_threshold: 0.5
   xgboost:
     n_estimators: 400                                            # 基线 XGBoost 树数
     max_depth: 4                                                 # 树深
@@ -174,6 +185,8 @@ BASELINES:
     reg_lambda: 1.0                                              # L2 正则
     random_state: 42                                             # 随机种子
     n_jobs: -1                                                   # 并行线程
+    use_custom_threshold: true
+    custom_threshold: 0.4
 
 EXP:
   kfold_repeats: 1                                               # K 折重复次数
