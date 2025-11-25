@@ -102,9 +102,18 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
     """根据配置加载数据集，支持 adult CSV、ARFF 以及多种表格格式。"""
 
     data_cfg = cfg.get("DATA", {})
-    raw_path = data_cfg.get("raw_path") or data_cfg.get("path")
+    raw_path = data_cfg.get("raw_path") or data_cfg.get("path") or data_cfg.get("data_path")
     file_type_cfg = data_cfg.get("file_type")
     file_type = str(file_type_cfg).lower() if file_type_cfg is not None else ""
+    if raw_path:
+        raw_path_path = Path(raw_path)
+        if not raw_path_path.is_absolute() and not raw_path_path.exists():
+            repo_root = Path(__file__).resolve().parent.parent
+            alt_path = repo_root / raw_path_path
+            if alt_path.exists():
+                raw_path_path = alt_path
+        raw_path = str(raw_path_path)
+
     if not file_type and raw_path:
         file_type = Path(raw_path).suffix.lower().lstrip(".") or "csv"
     dataset_name = data_cfg.get("dataset_name", "dataset")
@@ -115,8 +124,45 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
     if file_type == "arff":
         df = _load_arff(raw_path)
     elif file_type in {"csv", "txt"}:
-        if dataset_name.lower() == "adult":
+        dataset_name_lower = dataset_name.lower()
+        if dataset_name_lower == "adult":
             df = load_adult_raw(cfg)
+        elif dataset_name_lower == "bank_full":
+            tmp_cfg = dict(data_cfg)
+            tmp_cfg.setdefault("sep", ";")
+            df = _load_csv_like(raw_path, tmp_cfg)
+            target_col = data_cfg.get("target_col", "y")
+            if target_col not in df.columns:
+                raise KeyError(f"银行数据集中未找到标签列 {target_col}")
+            y_raw = df[target_col].astype(str).str.strip().str.lower()
+            df[target_col] = y_raw.map({"yes": 1, "no": 0})
+            if df[target_col].isna().any():
+                raise ValueError("银行数据集的标签列存在无法识别的取值（非 yes/no）")
+            df[target_col] = df[target_col].astype(int)
+            data_cfg["positive_label"] = 1
+            data_cfg.setdefault("negative_label", 0)
+            data_cfg.setdefault(
+                "numeric_cols",
+                ["age", "balance", "day", "duration", "campaign", "pdays", "previous"],
+            )
+            data_cfg.setdefault(
+                "categorical_cols",
+                [
+                    "job",
+                    "marital",
+                    "education",
+                    "default",
+                    "housing",
+                    "loan",
+                    "contact",
+                    "month",
+                    "poutcome",
+                ],
+            )
+            log_info(
+                "【数据加载】银行营销数据集已读取，标签已映射为0/1，"
+                f"样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
+            )
         else:
             df = _load_csv_like(raw_path, data_cfg)
     elif file_type == "tsv":
