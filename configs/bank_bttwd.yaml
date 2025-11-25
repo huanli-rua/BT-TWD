@@ -1,18 +1,18 @@
 DATA:
-  dataset_name: "bank_full"
-  raw_path: "../data/bank/bank-full.csv"        # 数据文件路径（分号分隔）
-  data_path: "../data/bank/bank-full.csv"
-  target_col: "y"
-  positive_label: "yes"                      # 原始正类取值，会在加载时映射为 1
-  negative_label: "no"
-  file_type: "csv"
-  sep: ";"
-  use_kfold: true
-  n_splits: 5
-  shuffle: true
-  stratify: true
-  random_state: 42
-  test_size: 0.2
+  dataset_name: "bank_full"              # 数据集名称（加载 bank_full 特殊分支）
+  raw_path: "data/bank/bank-full.csv"    # 原始数据文件路径（分号分隔）
+  data_path: "data/bank/bank-full.csv"   # 训练使用的数据文件路径
+  target_col: "y"                         # 标签列名（"yes"/"no"）
+  positive_label: "yes"                  # 原始正类取值，会在加载时映射为 1
+  negative_label: "no"                   # 原始负类取值，会在加载时映射为 0
+  file_type: "csv"                       # 文件类型，明确走 CSV 加载逻辑
+  sep: ";"                               # 列分隔符（bank 数据为分号）
+  use_kfold: true                         # 是否启用 K 折
+  n_splits: 5                             # K 折数量
+  shuffle: true                           # 拆分时是否打乱
+  stratify: true                          # 拆分时是否分层抽样
+  random_state: 42                        # 随机种子
+  test_size: 0.2                          # 测试集比例
 
 PREPROCESS:
   continuous_cols:
@@ -33,13 +33,13 @@ PREPROCESS:
     - "contact"
     - "month"
     - "poutcome"
-  handle_missing: "none"
-  fillna_strategy: "most_frequent"
-  scale_continuous: true
-  scaler_type: "standard"
-  encoding_type: "onehot"
-  drop_first: true
-  save_feature_names: true
+  handle_missing: "none"                 # 缺失值处理方式（bank 数据缺失较少，先不特殊处理）
+  fillna_strategy: "most_frequent"       # 填充策略（如需要使用众数填充）
+  scale_continuous: true                  # 是否对连续特征做标准化
+  scaler_type: "standard"                # 连续特征标准化方式（standard/robust 等）
+  encoding_type: "onehot"                # 类别特征编码方式
+  drop_first: true                        # 是否丢弃第一列以避免共线性
+  save_feature_names: true                # 是否保存特征名以便解释
 
 BTTWD:
   bucket_levels:
@@ -47,7 +47,7 @@ BTTWD:
       name: "L1_age"
       type: "numeric_bin"
       col: "age"
-      bins: [30, 40, 50, 60]
+      bins: [30, 40, 50, 60]              # 年龄分桶边界
       labels: ["<=30", "30-40", "40-50", "50-60", ">60"]
 
     - level: 2
@@ -61,7 +61,7 @@ BTTWD:
         no_income:     ["student", "unemployed"]
         retired:       ["retired"]
         unknown:       ["unknown"]
-      default_group: "unknown"
+      default_group: "unknown"             # 不在上述分组内的类别归入 unknown
 
     - level: 3
       name: "L3_contact"
@@ -70,31 +70,31 @@ BTTWD:
       groups:
         cellular: ["cellular"]
         telephone: ["telephone"]
-      default_group: "unknown"
+      default_group: "unknown"             # 未覆盖渠道归为 unknown
 
-  min_bucket_size: 200
-  max_levels: 3
-  min_gain_for_split: 0.005
-  gamma_bucket: 0.02
-  bucket_subsample: 1.0
-  max_train_samples_per_bucket: 5000
-  score_metric: "bac_regret"
-  parent_share_rate: 0.2
-  min_parent_share: 50
-  val_ratio: 0.3
-  min_val_samples_per_bucket: 20
-  use_global_backoff: true
-  global_estimator: "xgb"
-  bucket_estimator: "none"
-  posterior_estimator: "logreg"
-  logreg_C: 1.0
-  knn_k: 10
-  bucket_rf:
+  min_bucket_size: 200                     # 叶子桶最少样本数，不足则并回父桶或全局
+  max_levels: 3                            # 桶树最大层级
+  min_gain_for_split: 0.005                # 分裂增益阈值，小于该值不继续细分
+  gamma_bucket: 0.02                       # 桶数复杂度惩罚系数
+  bucket_subsample: 1.0                    # 桶内样本采样比例
+  max_train_samples_per_bucket: 5000       # 每个桶最多用于训练的样本数
+  score_metric: "bac_regret"               # 桶结构评分指标：BAC - Regret
+  parent_share_rate: 0.2                  # 子桶向父桶贡献样本的比例
+  min_parent_share: 50                    # 子桶向父桶贡献的最少样本数
+  val_ratio: 0.3                          # 训练集中抽出作为阈值验证集的比例
+  min_val_samples_per_bucket: 20          # 每桶阈值搜索的最少验证样本数
+  use_global_backoff: true                # 桶/父桶无模型时是否回退全局模型
+  global_estimator: "xgb"                 # 全局兜底模型：logreg/xgb/rf/knn/nb/none
+  bucket_estimator: "none"                # 桶内局部模型：logreg/xgb/rf/knn/nb/none
+  posterior_estimator: "logreg"           # 后验概率校准模型类型
+  logreg_C: 1.0                           # 逻辑回归正则化强度
+  knn_k: 10                               # KNN 邻居数
+  bucket_rf:                              # 桶内随机森林参数
     n_estimators: 200
     max_depth: null
     random_state: 42
     n_jobs: -1
-  bucket_xgb:
+  bucket_xgb:                             # 桶内 XGBoost 参数（若启用）
     n_estimators: 200
     max_depth: 3
     learning_rate: 0.1
@@ -103,76 +103,76 @@ BTTWD:
     reg_lambda: 1.0
     random_state: 42
     n_jobs: -1
-  global_xgb:
-    n_estimators: 300
-    max_depth: 4
-    learning_rate: 0.1
-    subsample: 0.8
-    colsample_bytree: 0.8
-    reg_lambda: 1.0
-    random_state: 42
-    n_jobs: -1
+  global_xgb:                             # 全局 XGBoost 参数
+    n_estimators: 300                     # 迭代树数
+    max_depth: 4                          # 树深度
+    learning_rate: 0.1                    # 学习率
+    subsample: 0.8                        # 行采样比例
+    colsample_bytree: 0.8                 # 列采样比例
+    reg_lambda: 1.0                       # L2 正则项
+    random_state: 42                      # 随机种子
+    n_jobs: -1                            # 并行线程数
 
 THRESHOLDS:
-  mode: "bucket_wise"
-  objective: "regret"
-  alpha_grid: [0.6, 0.7, 0.8, 0.9]
-  beta_grid: [0.1, 0.2, 0.3, 0.4]
-  gap_min: 0.05
+  mode: "bucket_wise"                     # 每个桶单独搜索阈值
+  objective: "regret"                     # 以 regret 为优化目标
+  alpha_grid: [0.6, 0.7, 0.8, 0.9]         # α 候选
+  beta_grid: [0.1, 0.2, 0.3, 0.4]          # β 候选
+  gap_min: 0.05                            # α、β 间隔下限
   costs:
-    C_TP: 0.0
-    C_TN: 0.0
-    C_FP: 1.0
-    C_FN: 3.0
-    C_BP: 1.5
-    C_BN: 0.5
-  alpha_init: 0.6
-  beta_init: 0.2
-  min_samples_for_thresholds: 50
+    C_TP: 0.0                              # 真正类成本
+    C_TN: 0.0                              # 真负类成本
+    C_FP: 1.0                              # 假正类成本（误报）
+    C_FN: 3.0                              # 假负类成本（漏报）
+    C_BP: 1.5                              # 边界-正成本
+    C_BN: 0.5                              # 边界-负成本
+  alpha_init: 0.6                         # α 搜索初始值
+  beta_init: 0.2                          # β 搜索初始值
+  min_samples_for_thresholds: 50          # 阈值搜索的最少样本数
 
 BASELINES:
-  use_logreg: true
-  use_random_forest: false
-  use_knn: false
-  use_xgboost: true
+  use_logreg: true                        # 是否训练逻辑回归 baseline
+  use_random_forest: false                # 是否训练随机森林 baseline
+  use_knn: false                          # 是否训练 KNN baseline
+  use_xgboost: true                       # 是否训练 XGBoost baseline
 
   common:
-    threshold_mode: "fixed"
-    fixed_threshold: 0.4
+    threshold_mode: "fixed"               # baseline 统一的阈值模式
+    fixed_threshold: 0.4                  # 若使用固定阈值时的默认阈值
   logreg:
-    C: 1.0
-    max_iter: 500
-    use_custom_threshold: true
-    custom_threshold: 0.4
+    C: 1.0                                # 逻辑回归正则化强度
+    max_iter: 500                         # 逻辑回归最大迭代次数
+    use_custom_threshold: true            # 是否为逻辑回归单独指定阈值
+    custom_threshold: 0.4                 # 逻辑回归自定义阈值
   xgboost:
-    n_estimators: 300
-    max_depth: 4
-    learning_rate: 0.1
-    subsample: 0.8
-    colsample_bytree: 0.8
-    reg_lambda: 1.0
-    random_state: 42
-    n_jobs: -1
-    use_custom_threshold: true
-    custom_threshold: 0.4
+    n_estimators: 300                     # 迭代树数
+    max_depth: 4                          # 树最大深度
+    learning_rate: 0.1                    # 学习率
+    subsample: 0.8                        # 行采样比例
+    colsample_bytree: 0.8                 # 列采样比例
+    reg_lambda: 1.0                       # L2 正则项
+    random_state: 42                      # 随机种子
+    n_jobs: -1                            # 并行线程数
+    use_custom_threshold: true            # 是否为 XGBoost 指定独立阈值
+    custom_threshold: 0.4                 # XGBoost 自定义阈值
 
 EXP:
-  kfold_repeats: 1
-  n_jobs: -1
-  verbose: 1
+  kfold_repeats: 1                        # K 折重复次数
+  n_jobs: -1                              # 并行线程数
+  verbose: 1                              # 日志级别
 
 METRICS:
-  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret"]
-  pos_label: 1
+  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret"]  # 需要计算的指标
+  pos_label: 1                            # 正类标签取值
 
 OUTPUT:
-  results_dir: "results"
-  figs_dir: "figs"
-  save_per_fold_metrics: true
-  save_bucket_metrics: true
-  save_config_copy: true
-  save_threshold_logs: true
-  threshold_log_filename: "bucket_thresholds_per_fold.csv"
+  results_dir: "results"                 # 结果保存目录
+  figs_dir: "figs"                       # 图像保存目录
+  save_per_fold_metrics: true             # 是否保存单折指标
+  save_bucket_metrics: true               # 是否保存桶级指标
+  save_config_copy: true                  # 是否保存配置副本
+  save_threshold_logs: true               # 是否保存阈值搜索日志
+  threshold_log_filename: "bucket_thresholds_per_fold.csv"  # 阈值日志文件名
 
 SEED:
-  global_seed: 42
+  global_seed: 42                         # 全局随机种子
