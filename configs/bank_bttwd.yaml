@@ -1,7 +1,7 @@
 DATA:
   dataset_name: "bank_full"
-  raw_path: "data/bank/bank-full.csv"        # 数据文件路径（分号分隔）
-  data_path: "data/bank/bank-full.csv"
+  raw_path: "../data/bank/bank-full.csv"        # 数据文件路径（分号分隔）
+  data_path: "../data/bank/bank-full.csv"
   target_col: "y"
   positive_label: "yes"                      # 原始正类取值，会在加载时映射为 1
   negative_label: "no"
