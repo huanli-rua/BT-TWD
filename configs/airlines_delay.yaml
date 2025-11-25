@@ -97,9 +97,14 @@ BTTWD:
       labels: ["night","morning","afternoon","evening","late"]
 
   min_bucket_size: 1000                                          # 叶子桶最小样本数，小于则回退
+  max_levels: 3                                                  # 桶树最大层数（类似 XGBoost 的 max_depth）
+  min_gain_for_split: 0.01                                       # 桶级增益阈值，小于该值则不继续细分
+  gamma_bucket: 0.05                                             # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
+  bucket_subsample: 0.7                                          # 桶内随机采样比例（类似 XGBoost 的 subsample）
+  max_train_samples_per_bucket: 20000                            # 每个桶最多用于训练的样本数
+  score_metric: "bac_regret"                                      # 增益评分指标，当前为 BAC - Regret
   parent_share_rate: 0.2                                         # 子桶回流到父桶的比例
   min_parent_share: 500                                         # 父桶至少回流样本数
-  max_depth: 3                                                   # 桶树最大层数
   val_ratio: 0.2                                                 # 桶内验证集比例
   min_val_samples_per_bucket: 30                                # 桶内最少验证样本
   use_global_backoff: true                                       # 桶或父桶无模型时是否使用全局模型
