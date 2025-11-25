@@ -47,6 +47,32 @@ def load_adult_raw(cfg: dict) -> pd.DataFrame:
     return df
 
 
+def load_bank_full(cfg: dict) -> pd.DataFrame:
+    """加载 UCI Bank Marketing 完整数据集（bank-full.csv）。"""
+
+    data_cfg = cfg.get("DATA", {})
+    path = data_cfg.get("raw_path") or data_cfg.get("path") or data_cfg.get("data_path")
+    target_col = data_cfg.get("target_col", "y")
+    pos_label_raw = str(data_cfg.get("positive_label", "yes")).strip().lower()
+
+    df = pd.read_csv(path, sep=";", skipinitialspace=True)
+    df[target_col] = (
+        df[target_col].astype(str).str.strip().str.lower() == pos_label_raw
+    ).astype(int)
+
+    # 更新配置中的标签标记，保证后续预处理/指标计算统一以 0/1 为准
+    data_cfg["positive_label"] = 1
+    data_cfg["negative_label"] = 0
+
+    total = len(df)
+    n_features = df.shape[1] - 1
+    pos_rate = df[target_col].mean()
+    log_info(
+        f"【数据加载完毕】Bank-full 样本数={total}，特征数={n_features}，正类比例={pos_rate:.2%}"
+    )
+    return df
+
+
 def _load_csv_like(path: str, data_cfg: dict) -> pd.DataFrame:
     sep = data_cfg.get("sep", ",")
     encoding = data_cfg.get("encoding", "utf-8")
@@ -102,7 +128,7 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
     """根据配置加载数据集，支持 adult CSV、ARFF 以及多种表格格式。"""
 
     data_cfg = cfg.get("DATA", {})
-    raw_path = data_cfg.get("raw_path") or data_cfg.get("path")
+    raw_path = data_cfg.get("raw_path") or data_cfg.get("path") or data_cfg.get("data_path")
     file_type_cfg = data_cfg.get("file_type")
     file_type = str(file_type_cfg).lower() if file_type_cfg is not None else ""
     if not file_type and raw_path:
@@ -115,8 +141,11 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
     if file_type == "arff":
         df = _load_arff(raw_path)
     elif file_type in {"csv", "txt"}:
-        if dataset_name.lower() == "adult":
+        dataset_name_lower = dataset_name.lower()
+        if dataset_name_lower == "adult":
             df = load_adult_raw(cfg)
+        elif dataset_name_lower == "bank_full":
+            df = load_bank_full(cfg)
         else:
             df = _load_csv_like(raw_path, data_cfg)
     elif file_type == "tsv":
