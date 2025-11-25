@@ -47,6 +47,16 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None):
         random_state=random_state,
     )
 
+    # 重置分桶特征的索引，使其与对应的 X/y 数组位置对齐，避免后续按 index 访问概率时越界
+    bucket_train = bucket_train.reset_index(drop=True)
+    bucket_val = bucket_val.reset_index(drop=True)
+    bucket_test = bucket_test.reset_index(drop=True)
+
+    # 开发阶段的安全检查，确保长度一致
+    assert len(X_train) == len(bucket_train) == len(y_train)
+    assert len(X_val) == len(bucket_val) == len(y_val)
+    assert len(X_test) == len(bucket_test) == len(y_test)
+
     log_info(
         "【数据切分】训练/验证/测试样本数 = "
         f"{len(X_train)}/{len(X_val)}/{len(X_test)}，训练正类占比={y_train.mean():.2%}"
