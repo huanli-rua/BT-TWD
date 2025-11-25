@@ -17,6 +17,33 @@ from .metrics import compute_binary_metrics, log_metrics, predict_binary_by_cost
 from .utils_logging import log_info
 
 
+def get_decision_threshold(model_key: str, cfg: dict) -> tuple[float, str, bool]:
+    """
+    根据 BASELINES 配置返回决策阈值。
+
+    返回值为 (threshold, mode, used_custom)，其中 used_custom 表示是否启用了模型自定义阈值。
+    """
+
+    base_cfg = cfg.get("BASELINES", {})
+    common_cfg = base_cfg.get("common", {})
+
+    mode = common_cfg.get("threshold_mode", "fixed")
+    global_threshold = float(common_cfg.get("fixed_threshold", 0.5))
+
+    if mode == "fixed":
+        return global_threshold, mode, False
+
+    if mode == "per_model":
+        model_cfg = base_cfg.get(model_key, {})
+        use_custom = model_cfg.get("use_custom_threshold", False)
+        if use_custom:
+            return float(model_cfg.get("custom_threshold", global_threshold)), mode, True
+        return global_threshold, mode, False
+
+    # 预留其它模式，默认回退到全局阈值
+    return global_threshold, mode, False
+
+
 def _make_writable_matrix(X):
     """确保特征矩阵是可写的 numpy 数组。"""
 
@@ -80,11 +107,21 @@ def _aggregate_baseline_summary(per_fold_records: list[dict]) -> dict:
 
 
 
-def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
+def _run_baseline_cv(
+    model_builder,
+    model_name: str,
+    model_key: str,
+    X,
+    y,
+    cfg,
+    cv_splitter,
+    costs: dict | None = None,
+) -> dict:
     X = _make_writable_matrix(X)
     y = _make_writable_vector(y)
 
     metrics_cfg = cfg.get("METRICS", {})
+    threshold, mode, used_custom = get_decision_threshold(model_key, cfg)
 
     per_fold_records: list[dict] = []
     if isinstance(cv_splitter, StratifiedKFold):
@@ -96,15 +133,23 @@ def _run_baseline_cv(model_builder, model_name: str, X, y, cfg, cv_splitter, cos
             random_state=42,
         )
 
+    if mode == "per_model" and used_custom:
+        log_info(f"【基线-{model_name}】使用模型自定义阈值={threshold:.3f}（per_model 模式）")
+    elif mode == "per_model":
+        log_info(f"【基线-{model_name}】使用通用阈值={threshold:.3f}（per_model 模式）")
+    else:
+        log_info(f"【基线-{model_name}】使用决策阈值={threshold:.3f}（fixed 模式）")
+
     fold_idx = 1
     for train_idx, test_idx in splitter.split(X, y):
         clf = model_builder()
         clf.fit(X[train_idx], y[train_idx])
 
-        y_pred = clf.predict(X[test_idx])
         if hasattr(clf, "predict_proba"):
             y_score = clf.predict_proba(X[test_idx])[:, 1]
+            y_pred = (y_score >= threshold).astype(int)
         else:
+            y_pred = clf.predict(X[test_idx])
             y_score = np.zeros_like(y_pred, dtype=float)
 
         metrics_dict = compute_binary_metrics(y[test_idx], y_pred, y_score, metrics_cfg, costs=costs)
@@ -125,7 +170,7 @@ def train_eval_logreg(X, y, cfg, cv_splitter, costs: dict | None = None) -> dict
     def _builder():
         return LogisticRegression(max_iter=model_cfg.get("max_iter", 200), C=model_cfg.get("C", 1.0))
 
-    return _run_baseline_cv(_builder, "LogReg", X, y, cfg, cv_splitter, costs=costs)
+    return _run_baseline_cv(_builder, "LogReg", "logreg", X, y, cfg, cv_splitter, costs=costs)
 
 
 def train_eval_random_forest(X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
@@ -139,7 +184,7 @@ def train_eval_random_forest(X, y, cfg, cv_splitter, costs: dict | None = None) 
             n_jobs=cfg.get("EXP", {}).get("n_jobs", -1),
         )
 
-    return _run_baseline_cv(_builder, "RF", X, y, cfg, cv_splitter, costs=costs)
+    return _run_baseline_cv(_builder, "RF", "random_forest", X, y, cfg, cv_splitter, costs=costs)
 
 
 def train_eval_knn(X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
@@ -154,7 +199,7 @@ def train_eval_knn(X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
             n_neighbors=knn_cfg.get("n_neighbors", 10),
         )
 
-    return _run_baseline_cv(_builder, "KNN", X, y, cfg, cv_splitter, costs=costs)
+    return _run_baseline_cv(_builder, "KNN", "knn", X, y, cfg, cv_splitter, costs=costs)
 
 
 def train_eval_xgboost(X, y, cfg, cv_splitter, costs: dict | None = None) -> dict:
@@ -181,4 +226,4 @@ def train_eval_xgboost(X, y, cfg, cv_splitter, costs: dict | None = None) -> dic
             use_label_encoder=False,
         )
 
-    return _run_baseline_cv(_builder, "XGB", X, y, cfg, cv_splitter, costs=costs)
+    return _run_baseline_cv(_builder, "XGB", "xgboost", X, y, cfg, cv_splitter, costs=costs)
