@@ -120,16 +120,26 @@ BASELINES:
   use_random_forest: true
   use_knn: true
   use_xgboost: true
+
+  common:
+    threshold_mode: "fixed"
+    fixed_threshold: 0.5
   logreg:
     C: 1.0
     max_iter: 500
+    use_custom_threshold: false
+    custom_threshold: 0.5
   random_forest:
     n_estimators: 200
     max_depth: null
     random_state: 42
+    use_custom_threshold: false
+    custom_threshold: 0.5
 
   knn:
     n_neighbors: 6
+    use_custom_threshold: false
+    custom_threshold: 0.5
 
   xgboost:
     n_estimators: 300
@@ -140,6 +150,8 @@ BASELINES:
     reg_lambda: 1.0
     random_state: 42
     n_jobs: -1
+    use_custom_threshold: false
+    custom_threshold: 0.5
 
 EXP:
   kfold_repeats: 1
