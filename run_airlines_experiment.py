@@ -14,6 +14,7 @@ from bttwdlib import (
     load_dataset,
     load_yaml_cfg,
     prepare_features_and_labels,
+    run_kfold_experiments,
     show_cfg,
 )
 from bttwdlib.metrics import predict_binary_by_cost
@@ -44,6 +45,11 @@ def main():
     log_info(f"【桶树层级】分裂顺序={[lvl.get('name') for lvl in bucket_levels]}")
 
     X, y, meta, bucket_df, bucket_cols = _build_bucket_feature_df(df_raw, cfg)
+
+    if cfg.get("DATA", {}).get("use_kfold", False):
+        log_info("【模式选择】use_kfold=true，启动K折实验...")
+        run_kfold_experiments(X, y, bucket_df, cfg)
+        return
 
     split_cfg = cfg.get("DATA", {}).get("split", {})
     train_ratio = split_cfg.get("train_ratio", 0.7)
