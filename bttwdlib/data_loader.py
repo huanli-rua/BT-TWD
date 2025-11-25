@@ -123,7 +123,7 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
         tmp = dict(data_cfg)
         tmp.setdefault("sep", "\t")
         df = _load_csv_like(raw_path, tmp)
-    elif file_type == "dat":
+    elif file_type in {"dat", "data"}:
         tmp = dict(data_cfg)
         tmp.setdefault("sep", None)
         df = _load_csv_like(raw_path, tmp)
