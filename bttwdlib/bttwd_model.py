@@ -502,6 +502,12 @@ class BTTWDModel:
                 X_train_bucket, y_train_bucket = self._sample_bucket_data(
                     X_train_bucket, y_train_bucket, bucket_id
                 )
+                if np.unique(y_train_bucket).size < 2:
+                    log_info(
+                        f"【BTTWD】叶子桶 {bucket_id} 采样后仅剩单类样本，使用父桶/全局阈值"
+                    )
+                    record["use_parent_threshold"] = True
+                    continue
                 model.fit(X_train_bucket, y_train_bucket)
                 self.bucket_models[bucket_id] = model
 
@@ -593,6 +599,12 @@ class BTTWDModel:
                 X_train_bucket, y_train_bucket = self._sample_bucket_data(
                     X_train_bucket, y_train_bucket, parent_id
                 )
+                if np.unique(y_train_bucket).size < 2:
+                    log_info(
+                        f"【BTTWD】父桶 {parent_id} 采样后仅剩单类样本，使用父桶/全局阈值"
+                    )
+                    record["use_parent_threshold"] = True
+                    continue
                 model.fit(X_train_bucket, y_train_bucket)
                 self.bucket_models[parent_id] = model
 
