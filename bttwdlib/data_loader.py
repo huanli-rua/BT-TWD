@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 from scipy.io import arff
 from .utils_logging import log_info
@@ -45,6 +47,24 @@ def load_adult_raw(cfg: dict) -> pd.DataFrame:
     return df
 
 
+def _load_csv_like(path: str, data_cfg: dict) -> pd.DataFrame:
+    sep = data_cfg.get("sep", ",")
+    encoding = data_cfg.get("encoding", "utf-8")
+    header = data_cfg.get("header", "infer")
+    names = data_cfg.get("col_names")
+    skiprows = data_cfg.get("skiprows")
+    df = pd.read_csv(
+        path,
+        sep=sep,
+        encoding=encoding,
+        header=header,
+        names=names,
+        skiprows=skiprows,
+    )
+    log_info(f"【数据加载】文本表格 {path} 已读取，样本数={len(df)}，列数={df.shape[1]}")
+    return df
+
+
 def _load_arff(path: str) -> pd.DataFrame:
     data, meta = arff.loadarff(path)
     df = pd.DataFrame(data)
@@ -79,20 +99,45 @@ def _apply_target_transform(df: pd.DataFrame, data_cfg: dict) -> tuple[pd.DataFr
 
 
 def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
-    """根据配置加载数据集，支持 adult CSV 和 ARFF 等格式。"""
+    """根据配置加载数据集，支持 adult CSV、ARFF 以及多种表格格式。"""
 
     data_cfg = cfg.get("DATA", {})
-    file_type = str(data_cfg.get("file_type", "csv")).lower()
-    dataset_name = data_cfg.get("dataset_name", "dataset")
     raw_path = data_cfg.get("raw_path") or data_cfg.get("path")
+    file_type_cfg = data_cfg.get("file_type")
+    file_type = str(file_type_cfg).lower() if file_type_cfg is not None else ""
+    if not file_type and raw_path:
+        file_type = Path(raw_path).suffix.lower().lstrip(".") or "csv"
+    dataset_name = data_cfg.get("dataset_name", "dataset")
 
     if raw_path is None:
         raise FileNotFoundError("配置中缺少 raw_path/path 字段，无法读取数据")
 
     if file_type == "arff":
         df = _load_arff(raw_path)
+    elif file_type in {"csv", "txt"}:
+        if dataset_name.lower() == "adult":
+            df = load_adult_raw(cfg)
+        else:
+            df = _load_csv_like(raw_path, data_cfg)
+    elif file_type == "tsv":
+        tmp = dict(data_cfg)
+        tmp.setdefault("sep", "\t")
+        df = _load_csv_like(raw_path, tmp)
+    elif file_type in {"dat", "data"}:
+        tmp = dict(data_cfg)
+        tmp.setdefault("sep", None)
+        df = _load_csv_like(raw_path, tmp)
+    elif file_type == "parquet":
+        df = pd.read_parquet(raw_path)
+    elif file_type in {"feather"}:
+        df = pd.read_feather(raw_path)
+    elif file_type in {"excel", "xlsx", "xls"}:
+        sheet = data_cfg.get("sheet_name", 0)
+        df = pd.read_excel(raw_path, sheet_name=sheet)
+    elif file_type in {"json", "jsonl"}:
+        df = pd.read_json(raw_path, lines=True)
     else:
-        df = load_adult_raw(cfg)
+        raise ValueError(f"未知的 file_type={file_type}")
 
     df, target_col = _apply_target_transform(df, data_cfg)
 
