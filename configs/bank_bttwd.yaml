@@ -74,6 +74,7 @@ BTTWD:
 
   min_bucket_size: 200                     # 叶子桶最少样本数，不足则并回父桶或全局
   max_levels: 3                            # 桶树最大层级
+  use_gain: true                           # 是否启用桶增益判定
   min_gain_for_split: 0.005                # 分裂增益阈值，小于该值不继续细分
   gamma_bucket: 0.02                       # 桶数复杂度惩罚系数
   bucket_subsample: 1.0                    # 桶内样本采样比例
