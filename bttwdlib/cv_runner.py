@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 from .bttwd_model import BTTWDModel
-from .bucket_rules import BucketTree
 from .baselines import (
     train_eval_knn,
     train_eval_logreg,
@@ -62,10 +61,8 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None):
         f"{len(X_train)}/{len(X_val)}/{len(X_test)}，训练正类占比={y_train.mean():.2%}"
     )
 
-    bucket_levels = cfg.get("BTTWD", {}).get("bucket_levels", [])
     bucket_cols = bucket_cols or bucket_df.columns.tolist()
-    bucket_tree = BucketTree(bucket_levels, feature_names=bucket_cols)
-    model = BTTWDModel(cfg, bucket_tree)
+    model = BTTWDModel.from_cfg(cfg, feature_names=bucket_cols)
     model.fit(X_train, y_train, bucket_train)
 
     y_score = model.predict_proba(X_test, bucket_test)
@@ -121,8 +118,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
         X_df_train = X_df_for_bucket.iloc[train_idx].reset_index(drop=True)
         X_df_test = X_df_for_bucket.iloc[test_idx].reset_index(drop=True)
 
-        bucket_tree = BucketTree(cfg.get("BTTWD", {}).get("bucket_levels", []), feature_names=X_df_for_bucket.columns.tolist())
-        bttwd_model = BTTWDModel(cfg, bucket_tree)
+        bttwd_model = BTTWDModel.from_cfg(cfg, feature_names=X_df_for_bucket.columns.tolist())
         bttwd_model.fit(X_train, y_train, X_df_train)
 
         y_score = bttwd_model.predict_proba(X_test, X_df_test)
@@ -145,7 +141,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
         per_fold_records.append(fold_record)
         bucket_df = bttwd_model.get_bucket_stats()
         if not bucket_df.empty:
-            test_bucket_ids = bucket_tree.assign_buckets(X_df_test)
+            test_bucket_ids = bttwd_model.bucket_tree.assign_buckets(X_df_test)
             test_bucket_records = []
             for bucket_id, idxs in test_bucket_ids.groupby(test_bucket_ids).groups.items():
                 idx_list = list(idxs)
