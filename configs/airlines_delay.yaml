@@ -81,12 +81,12 @@ BTTWD:
       labels: ["<=300", "300-800", "800-1500", "1500-5000", ">5000"]
 
     # ======= 候选层 5：月份（季度层）=======
-    - level: 5
-      name: "L3_season"
-      type: "numeric_bin"                                     # 按季度分箱
-      col: "Month"
-      bins: [3,6,9]
-      labels: ["Q1","Q2","Q3","Q4"]
+    # - level: 5
+    #   name: "L3_season"
+    #   type: "numeric_bin"                                     # 按季度分箱
+    #   col: "Month"
+    #   bins: [3,6,9]
+    #   labels: ["Q1","Q2","Q3","Q4"]
 
     # ======= 候选层 6：起飞时段 =======
     - level: 3
@@ -99,8 +99,8 @@ BTTWD:
   min_bucket_size: 500                                          # 叶子桶最小样本数，小于则回退
   max_levels: 4                                                 # 桶树最大层数（类似 XGBoost 的 max_depth）
   use_gain: true                                                # 是否启用桶增益判定
-  min_gain_for_split: 0.003                                       # 桶级增益阈值，小于该值则不继续细分
-  gamma_bucket: 0.005                                             # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
+  min_gain_for_split: 0.000                                       # 桶级增益阈值，小于该值则不继续细分
+  gamma_bucket: 0.000                                             # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
   bucket_subsample: 0.7                                          # 桶内随机采样比例（类似 XGBoost 的 subsample）
   max_train_samples_per_bucket: 20000                            # 每个桶最多用于训练的样本数
   score_metric: "bac_regret"                                      # 增益评分指标，当前为 BAC - Regret
@@ -110,7 +110,7 @@ BTTWD:
   min_val_samples_per_bucket: 30                                # 桶内最少验证样本
   use_global_backoff: true                                       # 桶或父桶无模型时是否使用全局模型
   global_estimator: "xgb"                                        # 全局模型类型（XGBoost）
-  bucket_estimator: "none"                                        # 桶内模型类型
+  bucket_estimator: "lr"                                        # 桶内模型类型
   posterior_estimator: "logreg"                                  # 后验估计或校准模型
   logreg_C: 1.0                                                  # 逻辑回归正则系数
   knn_k: 10                                                      # KNN 邻居数
@@ -192,7 +192,7 @@ BASELINES:
     random_state: 42                                             # 随机种子
     n_jobs: -1                                                   # 并行线程
     use_custom_threshold: true
-    custom_threshold: 0.15
+    custom_threshold: 0.3
 
 EXP:
   kfold_repeats: 1                                               # K 折重复次数

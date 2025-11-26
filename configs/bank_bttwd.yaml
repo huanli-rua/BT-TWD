@@ -75,12 +75,12 @@ BTTWD:
   min_bucket_size: 30                      # 叶子桶最少样本数，不足则并回父桶或全局
   max_levels: 3                            # 桶树最大层级
   use_gain: true                           # 是否启用桶增益判定
-  min_gain_for_split: 0.005                # 分裂增益阈值，小于该值不继续细分
-  gamma_bucket: 0.02                       # 桶数复杂度惩罚系数
+  min_gain_for_split: -0.02                # 分裂增益阈值，小于该值不继续细分
+  gamma_bucket: 0.002                       # 桶数复杂度惩罚系数
   bucket_subsample: 1.0                    # 桶内样本采样比例
   max_train_samples_per_bucket: 5000       # 每个桶最多用于训练的样本数
-  score_metric: "bac"               # 桶结构评分指标：BAC - Regret
-  parent_share_rate: 0.2                  # 子桶向父桶贡献样本的比例
+  score_metric: "bac_regret"               # 桶结构评分指标：BAC - Regret
+  parent_share_rate: 0.1                  # 子桶向父桶贡献样本的比例
   min_parent_share: 20                    # 子桶向父桶贡献的最少样本数
   val_ratio: 0.3                          # 训练集中抽出作为阈值验证集的比例
   min_val_samples_per_bucket: 20          # 每桶阈值搜索的最少验证样本数
@@ -139,7 +139,7 @@ BASELINES:
 
   common:
     threshold_mode: "fixed"               # baseline 统一的阈值模式
-    fixed_threshold: 0.4                  # 若使用固定阈值时的默认阈值
+    fixed_threshold: 0.3                  # 若使用固定阈值时的默认阈值
   logreg:
     C: 1.0                                # 逻辑回归正则化强度
     max_iter: 500                         # 逻辑回归最大迭代次数
@@ -155,7 +155,7 @@ BASELINES:
     random_state: 42                      # 随机种子
     n_jobs: -1                            # 并行线程数
     use_custom_threshold: true            # 是否为 XGBoost 指定独立阈值
-    custom_threshold: 0.4                 # XGBoost 自定义阈值
+    custom_threshold: 0.6                 # XGBoost 自定义阈值
 
 EXP:
   kfold_repeats: 1                        # K 折重复次数
