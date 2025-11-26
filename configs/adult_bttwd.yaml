@@ -64,11 +64,11 @@ BTTWD:
       labels: ["low_hours", "normal_hours", "high_hours"]
   min_bucket_size: 200              # 叶子桶若不足该数量就不单独建模，直接并入父桶
   max_levels: 3                     # 桶树最大层数（类似 XGBoost 的 max_depth）
-  min_gain_for_split: 0.003          # 桶级增益阈值，小于该值则不继续细分
-  gamma_bucket: 0.005                # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
+  min_gain_for_split: 0.000          # 桶级增益阈值，小于该值则不继续细分
+  gamma_bucket: 0.000                # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
   bucket_subsample: 0.7             # 桶内样本随机采样比例（类似 XGBoost 的 subsample）
   max_train_samples_per_bucket: 20000 # 每个桶最多用于训练的样本数
-  score_metric: "bac_regret"         # 增益评分指标，当前为 BAC - Regret
+  score_metric: "bac"         # 增益评分指标，当前为 BAC - Regret
   parent_share_rate: 0.2           # 大桶向父桶贡献的样本比例
   min_parent_share: 50             # 大桶向父桶贡献样本的最少数量
   val_ratio: 0.3                   # 训练集中按该比例划分验证集用来选阈值
@@ -110,14 +110,12 @@ THRESHOLDS:
   beta_grid:  [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]    # β 候选
   gap_min: 0.05
   costs:
-    C_TP: 0.0   # 真正类：把正类判为正类的成本（奖励视角下可视为0损失）
-    C_TN: 0.0   # 真负类：把负类判为负类的成本（同样一般设为0损失）
-
-    C_FP: 1.0   # 假正类：负类错判为正类的成本（误报成本）
-    C_FN: 3.0   # 假负类：正类错判为负类的成本（漏报成本，设得比FP大表示更怕漏检）
-
-    C_BP: 1.5   # 边界-正：实际为正类但落入BND的成本（介于“判对”和“漏报”之间）
-    C_BN: 0.5   # 边界-负：实际为负类但落入BND的成本（介于“判对”和“误报”之间）
+    C_TP: 0.0                              # 真正类成本
+    C_TN: 0.0                              # 真负类成本
+    C_FP: 0.75                              # 假正类成本（误报）
+    C_FN: 1.5                             # 假负类成本（漏报）
+    C_BP: 0.75                              # 边界-正成本
+    C_BN: 0.25                              # 边界-负成本
   min_samples_for_thresholds: 100
 
 

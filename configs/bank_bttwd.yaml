@@ -72,15 +72,15 @@ BTTWD:
         telephone: ["telephone"]
       default_group: "unknown"             # 未覆盖渠道归为 unknown
 
-  min_bucket_size: 200                     # 叶子桶最少样本数，不足则并回父桶或全局
+  min_bucket_size: 30                      # 叶子桶最少样本数，不足则并回父桶或全局
   max_levels: 3                            # 桶树最大层级
-  min_gain_for_split: 0.005                # 分裂增益阈值，小于该值不继续细分
-  gamma_bucket: 0.02                       # 桶数复杂度惩罚系数
-  bucket_subsample: 1.0                    # 桶内样本采样比例
+  min_gain_for_split: -0.01                # 分裂增益阈值，小于该值不继续细分
+  gamma_bucket: 0.0                       # 桶数复杂度惩罚系数
+  bucket_subsample: 0.5                    # 桶内样本采样比例
   max_train_samples_per_bucket: 5000       # 每个桶最多用于训练的样本数
-  score_metric: "bac_regret"               # 桶结构评分指标：BAC - Regret
+  score_metric: "bac"               # 桶结构评分指标：BAC - Regret
   parent_share_rate: 0.2                  # 子桶向父桶贡献样本的比例
-  min_parent_share: 50                    # 子桶向父桶贡献的最少样本数
+  min_parent_share: 20                    # 子桶向父桶贡献的最少样本数
   val_ratio: 0.3                          # 训练集中抽出作为阈值验证集的比例
   min_val_samples_per_bucket: 20          # 每桶阈值搜索的最少验证样本数
   use_global_backoff: true                # 桶/父桶无模型时是否回退全局模型
@@ -122,10 +122,10 @@ THRESHOLDS:
   costs:
     C_TP: 0.0                              # 真正类成本
     C_TN: 0.0                              # 真负类成本
-    C_FP: 1.0                              # 假正类成本（误报）
-    C_FN: 3.0                              # 假负类成本（漏报）
-    C_BP: 1.5                              # 边界-正成本
-    C_BN: 0.5                              # 边界-负成本
+    C_FP: 0.75                              # 假正类成本（误报）
+    C_FN: 1.5                             # 假负类成本（漏报）
+    C_BP: 0.75                              # 边界-正成本
+    C_BN: 0.25                              # 边界-负成本
   alpha_init: 0.6                         # α 搜索初始值
   beta_init: 0.2                          # β 搜索初始值
   min_samples_for_thresholds: 50          # 阈值搜索的最少样本数
@@ -133,7 +133,7 @@ THRESHOLDS:
 BASELINES:
   use_logreg: true                        # 是否训练逻辑回归 baseline
   use_random_forest: false                # 是否训练随机森林 baseline
-  use_knn: false                          # 是否训练 KNN baseline
+  use_knn: true                          # 是否训练 KNN baseline
   use_xgboost: true                       # 是否训练 XGBoost baseline
 
   common:
