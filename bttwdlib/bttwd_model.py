@@ -33,6 +33,7 @@ class BTTWDModel:
         self.min_bucket_size = bcfg.get("min_bucket_size", 50)
         self.max_levels = bcfg.get("max_levels", bcfg.get("max_depth", 10))
         self.min_gain_for_split = bcfg.get("min_gain_for_split", 0.0)
+        self.use_gain = bcfg.get("use_gain", True)
         self.gamma_bucket = bcfg.get("gamma_bucket", 0.0)
         self.parent_share_rate = bcfg.get("parent_share_rate", 0.0)
         self.min_parent_share = bcfg.get("min_parent_share", 0)
@@ -350,26 +351,29 @@ class BTTWDModel:
                 leaf_index_map[bucket_id] = idx_all
                 continue
 
-            parent_metrics = self._calc_bucket_metrics(proba_all[idx_all], y[idx_all])
-            parent_score = compute_bucket_score(parent_metrics, self.score_metric)
-            child_scores = []
-            child_weights = []
-            for cid, cidx in child_groups.items():
-                metrics = self._calc_bucket_metrics(proba_all[cidx], y[cidx])
-                child_scores.append(compute_bucket_score(metrics, self.score_metric))
-                child_weights.append(len(cidx) / len(idx_all))
+            if self.use_gain:
+                parent_metrics = self._calc_bucket_metrics(proba_all[idx_all], y[idx_all])
+                parent_score = compute_bucket_score(parent_metrics, self.score_metric)
+                child_scores = []
+                child_weights = []
+                for cid, cidx in child_groups.items():
+                    metrics = self._calc_bucket_metrics(proba_all[cidx], y[cidx])
+                    child_scores.append(compute_bucket_score(metrics, self.score_metric))
+                    child_weights.append(len(cidx) / len(idx_all))
 
-            gain = compute_bucket_gain(parent_score, child_scores, child_weights, self.gamma_bucket)
-            log_bt(
-                f"桶 {bucket_id} 分裂前 Score={parent_score:.4f}，层级 L{level + 1}，样本 n={len(idx_all)}；子桶Score={child_scores}，Gain={gain:.4f}"
-            )
+                gain = compute_bucket_gain(parent_score, child_scores, child_weights, self.gamma_bucket)
+                log_bt(
+                    f"桶 {bucket_id} 分裂前 Score={parent_score:.4f}，层级 L{level + 1}，样本 n={len(idx_all)}；子桶Score={child_scores}，Gain={gain:.4f}"
+                )
 
-            if gain < self.min_gain_for_split:
-                log_bt("Gain 不足，停止在本层")
-                leaf_index_map[bucket_id] = idx_all
-                continue
+                if gain < self.min_gain_for_split:
+                    log_bt("Gain 不足，停止在本层")
+                    leaf_index_map[bucket_id] = idx_all
+                    continue
 
-            log_bt(f"Gain 足够，进入下一层 L{child_level + 1}")
+                log_bt(f"Gain 足够，进入下一层 L{child_level + 1}")
+            else:
+                log_bt("Gain 开关关闭，跳过增益判定，直接细分下一层")
             queue.extend((cid, child_level) for cid in child_groups.keys())
 
         return leaf_index_map, visited_parent
