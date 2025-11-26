@@ -110,7 +110,7 @@ BTTWD:
   min_val_samples_per_bucket: 30                                # 桶内最少验证样本
   use_global_backoff: true                                       # 桶或父桶无模型时是否使用全局模型
   global_estimator: "xgb"                                        # 全局模型类型（XGBoost）
-  bucket_estimator: "lr"                                        # 桶内模型类型
+  bucket_estimator: "none"                                        # 桶内模型类型
   posterior_estimator: "logreg"                                  # 后验估计或校准模型
   logreg_C: 1.0                                                  # 逻辑回归正则系数
   knn_k: 10                                                      # KNN 邻居数
@@ -130,7 +130,7 @@ BTTWD:
     random_state: 42
     n_jobs: -1
   global_xgb:                                                    # 全局 XGBoost 模型参数
-    n_estimators: 400
+    n_estimators: 300
     max_depth: 4
     learning_rate: 0.1
     subsample: 0.8
@@ -165,7 +165,7 @@ BASELINES:
 
   common:
     threshold_mode: "per_model"                                  # "fixed" / "per_model"，默认 fixed
-    fixed_threshold: 0.3                                         # 全局默认阈值
+    fixed_threshold: 0.2                                         # 全局默认阈值
 
   logreg:
     C: 1.0                                                       # 逻辑回归正则化强度
