@@ -74,9 +74,10 @@ BTTWD:
 
   min_bucket_size: 30                      # 叶子桶最少样本数，不足则并回父桶或全局
   max_levels: 3                            # 桶树最大层级
-  min_gain_for_split: -0.01                # 分裂增益阈值，小于该值不继续细分
-  gamma_bucket: 0.0                       # 桶数复杂度惩罚系数
-  bucket_subsample: 0.5                    # 桶内样本采样比例
+  use_gain: true                           # 是否启用桶增益判定
+  min_gain_for_split: 0.005                # 分裂增益阈值，小于该值不继续细分
+  gamma_bucket: 0.02                       # 桶数复杂度惩罚系数
+  bucket_subsample: 1.0                    # 桶内样本采样比例
   max_train_samples_per_bucket: 5000       # 每个桶最多用于训练的样本数
   score_metric: "bac"               # 桶结构评分指标：BAC - Regret
   parent_share_rate: 0.2                  # 子桶向父桶贡献样本的比例

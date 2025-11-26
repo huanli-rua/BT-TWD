@@ -98,6 +98,7 @@ BTTWD:
 
   min_bucket_size: 500                                          # 叶子桶最小样本数，小于则回退
   max_levels: 4                                                 # 桶树最大层数（类似 XGBoost 的 max_depth）
+  use_gain: true                                                # 是否启用桶增益判定
   min_gain_for_split: 0.003                                       # 桶级增益阈值，小于该值则不继续细分
   gamma_bucket: 0.005                                             # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
   bucket_subsample: 0.7                                          # 桶内随机采样比例（类似 XGBoost 的 subsample）
