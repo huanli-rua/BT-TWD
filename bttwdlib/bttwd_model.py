@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover - optional dependency
     XGBClassifier = None
     _XGB_AVAILABLE = False
 
-from .bucket_rules import get_parent_bucket_id
+from .bucket_rules import BucketTree, get_parent_bucket_id
 from .utils_logging import log_bt, log_info
 from .threshold_search import search_thresholds_with_regret, compute_regret
 from .bucket_gain import compute_bucket_gain, compute_bucket_score
@@ -75,6 +75,25 @@ class BTTWDModel:
         self.global_pos_rate = 0.5
         self.rng = np.random.default_rng(self.random_state)
         self.bucket_estimator = self._build_bucket_estimator()
+
+    @classmethod
+    def from_cfg(cls, cfg: dict, feature_names: list[str] | None = None, bucket_tree=None) -> "BTTWDModel":
+        """
+        工厂方法：从配置构建 BucketTree 并初始化 BTTWDModel。
+
+        feature_names: 用于分桶的特征名列表；若未提供，则默认使用预处理配置中的连续+类别列。
+        bucket_tree: 允许直接传入已构建好的 BucketTree，主要用于测试或自定义场景。
+        """
+
+        if bucket_tree is None:
+            bttwd_cfg = cfg.get("BTTWD", {})
+            bucket_levels = bttwd_cfg.get("bucket_levels", [])
+            if feature_names is None:
+                prep_cfg = cfg.get("PREPROCESS", {})
+                feature_names = (prep_cfg.get("continuous_cols") or []) + (prep_cfg.get("categorical_cols") or [])
+            bucket_tree = BucketTree(bucket_levels, feature_names=feature_names or [])
+
+        return cls(cfg, bucket_tree)
 
     def _sample_bucket_data(self, X_bucket: np.ndarray, y_bucket: np.ndarray, bucket_id: str = ""):
         """
@@ -298,13 +317,8 @@ class BTTWDModel:
 
         return {"regret": float(regret_val), "bac": float(bac) if not np.isnan(bac) else np.nan}
 
-    def _split_buckets_with_gain(self, bucket_ids, proba_all: np.ndarray, y: np.ndarray):
-        """
-        基于桶增益判定自动决定是否继续细分。
-
-        bucket_ids 可以是 list / ndarray / Series，函数内部统一转成 Series 处理。
-        假设所有样本的 bucket_id 都来自统一的 BT 层级规则，即按 '|' 拆分后的长度在全体样本上是一致的。
-        """
+    def _build_bucket_tree_with_gain(self, bucket_ids, proba_all: np.ndarray, y: np.ndarray):
+        """基于 Gain 的桶树构建逻辑。"""
 
         bucket_ids = pd.Series(bucket_ids, dtype="string")
         parts_series = bucket_ids.str.split("|")
@@ -351,32 +365,88 @@ class BTTWDModel:
                 leaf_index_map[bucket_id] = idx_all
                 continue
 
-            if self.use_gain:
-                parent_metrics = self._calc_bucket_metrics(proba_all[idx_all], y[idx_all])
-                parent_score = compute_bucket_score(parent_metrics, self.score_metric)
-                child_scores = []
-                child_weights = []
-                for cid, cidx in child_groups.items():
-                    metrics = self._calc_bucket_metrics(proba_all[cidx], y[cidx])
-                    child_scores.append(compute_bucket_score(metrics, self.score_metric))
-                    child_weights.append(len(cidx) / len(idx_all))
+            parent_metrics = self._calc_bucket_metrics(proba_all[idx_all], y[idx_all])
+            parent_score = compute_bucket_score(parent_metrics, self.score_metric)
+            child_scores = []
+            child_weights = []
+            for cid, cidx in child_groups.items():
+                metrics = self._calc_bucket_metrics(proba_all[cidx], y[cidx])
+                child_scores.append(compute_bucket_score(metrics, self.score_metric))
+                child_weights.append(len(cidx) / len(idx_all))
 
-                gain = compute_bucket_gain(parent_score, child_scores, child_weights, self.gamma_bucket)
-                log_bt(
-                    f"桶 {bucket_id} 分裂前 Score={parent_score:.4f}，层级 L{level + 1}，样本 n={len(idx_all)}；子桶Score={child_scores}，Gain={gain:.4f}"
-                )
+            gain = compute_bucket_gain(parent_score, child_scores, child_weights, self.gamma_bucket)
+            log_bt(
+                f"桶 {bucket_id} 分裂前 Score={parent_score:.4f}，层级 L{level + 1}，样本 n={len(idx_all)}；子桶Score={child_scores}，Gain={gain:.4f}"
+            )
 
-                if gain < self.min_gain_for_split:
-                    log_bt("Gain 不足，停止在本层")
-                    leaf_index_map[bucket_id] = idx_all
-                    continue
+            if gain < self.min_gain_for_split:
+                log_bt("Gain 不足，停止在本层")
+                leaf_index_map[bucket_id] = idx_all
+                continue
 
-                log_bt(f"Gain 足够，进入下一层 L{child_level + 1}")
-            else:
-                log_bt("Gain 开关关闭，跳过增益判定，直接细分下一层")
+            log_bt(f"Gain 足够，进入下一层 L{child_level + 1}")
             queue.extend((cid, child_level) for cid in child_groups.keys())
 
         return leaf_index_map, visited_parent
+
+    def _build_bucket_tree_simple(self, bucket_ids) -> tuple[dict, dict]:
+        """不计算 Gain 的固定分层桶树逻辑。"""
+
+        log_bt("Gain 开关关闭(use_gain=False)，跳过增益判定，按固定规则细分桶树")
+
+        bucket_ids = pd.Series(bucket_ids, dtype="string")
+        parts_series = bucket_ids.str.split("|")
+        if len(parts_series) == 0:
+            return {}, {}
+
+        lengths = parts_series.apply(len)
+        if lengths.nunique() != 1:
+            raise ValueError("bucket_id 的层级深度不一致，当前实现假设所有路径长度相同")
+
+        num_levels = len(parts_series.iloc[0])
+        level_prefixes = []
+        for level in range(num_levels):
+            level_prefixes.append(parts_series.apply(lambda p: "|".join(p[: level + 1])))
+
+        level_groups = []
+        for lvl_series in level_prefixes:
+            level_groups.append({bid: idxs.to_numpy() for bid, idxs in lvl_series.groupby(lvl_series).groups.items()})
+
+        leaf_index_map = {}
+        visited_parent = {}
+        queue = deque((bucket_id, 0) for bucket_id in level_groups[0].keys())
+
+        while queue:
+            bucket_id, level = queue.popleft()
+            idx_all = level_groups[level][bucket_id]
+            parent_id = get_parent_bucket_id(bucket_id)
+            visited_parent[bucket_id] = parent_id
+
+            if level + 1 >= self.max_levels or level == num_levels - 1:
+                leaf_index_map[bucket_id] = idx_all
+                continue
+
+            child_level = level + 1
+            child_series = level_prefixes[child_level]
+            child_values = child_series.iloc[idx_all]
+            child_groups = {cid: idxs.to_numpy() for cid, idxs in child_values.groupby(child_values).groups.items()}
+
+            min_child_size = min(len(v) for v in child_groups.values()) if child_groups else 0
+            if any(len(v) < self.min_bucket_size for v in child_groups.values()):
+                log_bt(
+                    f"桶 {bucket_id} 子桶样本不足（最小子桶 n={min_child_size} < {self.min_bucket_size}），不再细分"
+                )
+                leaf_index_map[bucket_id] = idx_all
+                continue
+
+            queue.extend((cid, child_level) for cid in child_groups.keys())
+
+        return leaf_index_map, visited_parent
+
+    def _build_bucket_tree(self, bucket_ids, proba_all: np.ndarray, y: np.ndarray):
+        if self.use_gain:
+            return self._build_bucket_tree_with_gain(bucket_ids, proba_all, y)
+        return self._build_bucket_tree_simple(bucket_ids)
 
     def fit(self, X: np.ndarray, y: np.ndarray, X_df_for_bucket: pd.DataFrame):
         # Step 0: 划分 inner 训练/验证集
@@ -431,7 +501,7 @@ class BTTWDModel:
             proba_all = self.global_model.predict_proba(X)[:, 1]
 
         # Step 3: 桶增益判定，决定是否继续细分
-        leaf_index_map, visited_parent = self._split_buckets_with_gain(bucket_ids, proba_all, y)
+        leaf_index_map, visited_parent = self._build_bucket_tree(bucket_ids, proba_all, y)
 
         parent_index_map = defaultdict(list)
 
