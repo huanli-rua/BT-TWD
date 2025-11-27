@@ -41,6 +41,12 @@ PREPROCESS:
   drop_first: true                        # 是否丢弃第一列以避免共线性
   save_feature_names: true                # 是否保存特征名以便解释
 
+SCORE:
+  bucket_score_mode: "bac_regret"
+  bac_weight: 1.0
+  regret_weight: 1.0
+  regret_sign: -1.0
+
 BTTWD:
   bucket_levels:
     - level: 1
@@ -79,7 +85,6 @@ BTTWD:
   gamma_bucket: 0.002                       # 桶数复杂度惩罚系数
   bucket_subsample: 1.0                    # 桶内样本采样比例
   max_train_samples_per_bucket: 5000       # 每个桶最多用于训练的样本数
-  score_metric: "bac_regret"               # 桶结构评分指标：BAC - Regret
   parent_share_rate: 0.3                  # 子桶向父桶贡献样本的比例
   min_parent_share: 30                    # 子桶向父桶贡献的最少样本数
   val_ratio: 0.3                          # 训练集中抽出作为阈值验证集的比例
