@@ -45,6 +45,12 @@ PREPROCESS:
   drop_cols: []                                                  # 额外需要丢弃的列（此处为空，DepDelay 会在目标变换中排除）
   save_feature_names: true                                       # 是否保存特征名
 
+SCORE:
+  bucket_score_mode: "bac_regret"
+  bac_weight: 1.0
+  regret_weight: 1.0
+  regret_sign: -1.0
+
 BTTWD:
   bucket_levels:                                                 # 候选桶树层（通过注释开关组合）
 
@@ -105,7 +111,6 @@ BTTWD:
   gamma_bucket: 0.00                                             # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
   bucket_subsample: 0.7                                          # 桶内随机采样比例（类似 XGBoost 的 subsample）
   max_train_samples_per_bucket: 20000                            # 每个桶最多用于训练的样本数
-  score_metric: "bac_regret"                                      # 增益评分指标，当前为 BAC - Regret
   parent_share_rate: 0.2                                         # 子桶回流到父桶的比例
   min_parent_share: 60                                         # 父桶至少回流样本数
   val_ratio: 0.3                                                 # 桶内验证集比例

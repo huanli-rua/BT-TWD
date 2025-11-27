@@ -42,7 +42,6 @@ class BTTWDModel:
         self.use_global_backoff = bcfg.get("use_global_backoff", True)
         self.bucket_subsample = bcfg.get("bucket_subsample", 1.0)
         self.max_train_samples_per_bucket = bcfg.get("max_train_samples_per_bucket")
-        self.score_metric = bcfg.get("score_metric", "bac_regret")
         self.optimize_thresholds = True
         self.threshold_mode = thresh_cfg.get("mode", bcfg.get("thresholds_mode", "bucket_wise"))
         self.threshold_objective = thresh_cfg.get("objective", "regret")
@@ -76,6 +75,7 @@ class BTTWDModel:
         self.global_pos_rate = 0.5
         self.rng = np.random.default_rng(self.random_state)
         self.bucket_estimator = self._build_bucket_estimator()
+        self.score_cfg = self._build_score_cfg(cfg)
 
     @classmethod
     def from_cfg(cls, cfg: dict, feature_names: list[str] | None = None, bucket_tree=None) -> "BTTWDModel":
@@ -175,6 +175,28 @@ class BTTWDModel:
         return LogisticRegression(
             max_iter=bcfg.get("logreg_max_iter", 200), C=bcfg.get("logreg_C", 1.0)
         )
+
+    def _build_score_cfg(self, cfg: dict) -> dict:
+        """构建桶评分配置，兼容旧版 score_metric 字段。"""
+
+        score_cfg = cfg.get("SCORE")
+        bcfg = cfg.get("BTTWD", {})
+
+        if not isinstance(score_cfg, dict):
+            score_metric = bcfg.get("score_metric", "bac_regret")
+            return {
+                "bucket_score_mode": score_metric,
+                "bac_weight": 1.0,
+                "regret_weight": 1.0,
+                "regret_sign": -1.0,
+            }
+
+        merged_cfg = dict(score_cfg)
+        merged_cfg.setdefault("bucket_score_mode", score_cfg.get("score_metric", bcfg.get("score_metric", "bac_regret")))
+        merged_cfg.setdefault("bac_weight", 1.0)
+        merged_cfg.setdefault("regret_weight", 1.0)
+        merged_cfg.setdefault("regret_sign", -1.0)
+        return merged_cfg
 
     def _build_global_estimator(self):
         """构建全局后验估计器（例如 XGB）。"""
@@ -369,12 +391,12 @@ class BTTWDModel:
             child_groups = {cid: idxs.to_numpy() for cid, idxs in child_values.groupby(child_values).groups.items()}
 
             parent_metrics = self._calc_bucket_metrics(proba_all[idx_all], y[idx_all])
-            parent_score = compute_bucket_score(parent_metrics, self.score_metric)
+            parent_score = compute_bucket_score(parent_metrics, self.score_cfg)
             child_scores = []
             child_weights = []
             for cid, cidx in child_groups.items():
                 metrics = self._calc_bucket_metrics(proba_all[cidx], y[cidx])
-                child_scores.append(compute_bucket_score(metrics, self.score_metric))
+                child_scores.append(compute_bucket_score(metrics, self.score_cfg))
                 child_weights.append(len(cidx) / len(idx_all))
 
             gain = compute_bucket_gain(parent_score, child_scores, child_weights, self.gamma_bucket)
@@ -459,6 +481,11 @@ class BTTWDModel:
         return self._build_bucket_tree_simple(bucket_ids)
 
     def fit(self, X: np.ndarray, y: np.ndarray, X_df_for_bucket: pd.DataFrame):
+        log_info(
+            "[BT] 使用桶评分配置：mode="
+            f"{self.score_cfg.get('bucket_score_mode')}, bac_weight={self.score_cfg.get('bac_weight')}, "
+            f"regret_weight={self.score_cfg.get('regret_weight')}, regret_sign={self.score_cfg.get('regret_sign')}"
+        )
         # Step 0: 划分 inner 训练/验证集
         if self.val_ratio > 0:
             sss = StratifiedShuffleSplit(

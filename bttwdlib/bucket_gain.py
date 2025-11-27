@@ -1,30 +1,38 @@
 import numpy as np
 
-# 默认 score_metric="bac_regret" 等价于 score = BAC - Regret，可扩展为 BAC - λ*Regret 形式
 
-
-def compute_bucket_score(metrics: dict, mode: str = "bac_regret") -> float:
+def compute_bucket_score(metrics: dict, score_cfg: dict) -> float:
     """
-    输入桶的评估指标，输出一个用于结构决策的分数，分数越大越好。
+    根据桶内评估指标计算桶的综合得分，分数越大越好。
 
-    mode 支持：
-    - "regret": 取负 regret（regret 越小越好，因此乘以 -1）
-    - "bac": 直接使用平衡准确率 BAC
-    - "bac_regret": BAC - regret（默认）
+    参数：
+        metrics: dict，至少包含键：
+            - "BAC" 或 "bac": 桶内 balanced accuracy，0~1
+            - "Regret" 或 "regret": 桶内 regret（已按样本数归一化）
+        score_cfg: dict，对应 cfg["SCORE"], 包含：
+            - bucket_score_mode: "bac" / "regret" / "bac_regret"
+            - bac_weight: float
+            - regret_weight: float
+            - regret_sign: float，一般是 -1.0
     """
 
-    mode = str(mode or "").lower()
-    regret = metrics.get("regret")
-    bac = metrics.get("bac")
+    mode = str(score_cfg.get("bucket_score_mode", "bac_regret") or "").lower()
+    w_bac = float(score_cfg.get("bac_weight", 1.0))
+    w_reg = float(score_cfg.get("regret_weight", 1.0))
+    reg_sign = float(score_cfg.get("regret_sign", -1.0))
+
+    bac = metrics.get("BAC") if "BAC" in metrics else metrics.get("bac")
+    regret = metrics.get("Regret") if "Regret" in metrics else metrics.get("regret")
+
+    if mode == "bac":
+        return -np.inf if bac is None else w_bac * float(bac)
 
     if mode == "regret":
-        return -np.inf if regret is None else -float(regret)
-    if mode == "bac":
-        return -np.inf if bac is None else float(bac)
+        return -np.inf if regret is None else reg_sign * w_reg * float(regret)
 
-    regret_val = 0.0 if regret is None else float(regret)
     bac_val = 0.0 if bac is None else float(bac)
-    return bac_val - regret_val
+    regret_val = 0.0 if regret is None else float(regret)
+    return w_bac * bac_val + reg_sign * w_reg * regret_val
 
 
 def compute_bucket_gain(parent_score: float, child_scores: list[float], child_weights: list[float], gamma: float) -> float:
