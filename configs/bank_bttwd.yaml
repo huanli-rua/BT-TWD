@@ -80,8 +80,8 @@ BTTWD:
   bucket_subsample: 1.0                    # 桶内样本采样比例
   max_train_samples_per_bucket: 5000       # 每个桶最多用于训练的样本数
   score_metric: "bac_regret"               # 桶结构评分指标：BAC - Regret
-  parent_share_rate: 0.1                  # 子桶向父桶贡献样本的比例
-  min_parent_share: 20                    # 子桶向父桶贡献的最少样本数
+  parent_share_rate: 0.3                  # 子桶向父桶贡献样本的比例
+  min_parent_share: 30                    # 子桶向父桶贡献的最少样本数
   val_ratio: 0.3                          # 训练集中抽出作为阈值验证集的比例
   min_val_samples_per_bucket: 20          # 每桶阈值搜索的最少验证样本数
   use_global_backoff: true                # 桶/父桶无模型时是否回退全局模型
@@ -117,17 +117,17 @@ BTTWD:
 THRESHOLDS:
   mode: "bucket_wise"                     # 每个桶单独搜索阈值
   objective: "regret"                     # 以 regret 为优化目标
-  alpha_grid: [0.6, 0.7, 0.8, 0.9]         # α 候选
-  beta_grid: [0.1, 0.2, 0.3, 0.4]          # β 候选
+  alpha_grid: [0.3,0.4,0.5,0.6, 0.7, 0.8, 0.9]         # α 候选
+  beta_grid: [0.1, 0.2, 0.3, 0.4,0.5,0.6]          # β 候选
   gap_min: 0.05                            # α、β 间隔下限
   costs:
     C_TP: 0.0                              # 真正类成本
     C_TN: 0.0                              # 真负类成本
     C_FP: 0.75                              # 假正类成本（误报）
-    C_FN: 1.5                             # 假负类成本（漏报）
-    C_BP: 0.75                              # 边界-正成本
+    C_FN: 2.0                             # 假负类成本（漏报）
+    C_BP: 1.0                              # 边界-正成本
     C_BN: 0.25                              # 边界-负成本
-  alpha_init: 0.6                         # α 搜索初始值
+  alpha_init: 0.7                         # α 搜索初始值
   beta_init: 0.2                          # β 搜索初始值
   min_samples_for_thresholds: 50          # 阈值搜索的最少样本数
 
@@ -138,8 +138,8 @@ BASELINES:
   use_xgboost: true                       # 是否训练 XGBoost baseline
 
   common:
-    threshold_mode: "fixed"               # baseline 统一的阈值模式
-    fixed_threshold: 0.3                  # 若使用固定阈值时的默认阈值
+    threshold_mode: "per_model"               # baseline 统一的阈值模式
+    fixed_threshold: 0.4                  # 若使用固定阈值时的默认阈值
   logreg:
     C: 1.0                                # 逻辑回归正则化强度
     max_iter: 500                         # 逻辑回归最大迭代次数
@@ -155,7 +155,7 @@ BASELINES:
     random_state: 42                      # 随机种子
     n_jobs: -1                            # 并行线程数
     use_custom_threshold: true            # 是否为 XGBoost 指定独立阈值
-    custom_threshold: 0.6                 # XGBoost 自定义阈值
+    custom_threshold: 0.4                 # XGBoost 自定义阈值
 
 EXP:
   kfold_repeats: 1                        # K 折重复次数

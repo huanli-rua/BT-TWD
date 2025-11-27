@@ -72,13 +72,7 @@ BTTWD:
     #   min_count: 30000
     #   other_label: "OTHER"
 
-    # ======= 候选层 4：航程距离 =======
-    - level: 4
-      name: "L2_distance"
-      type: "numeric_bin"                                       # 航程距离分箱
-      col: "Distance"
-      bins: [300, 800, 1500, 5000]
-      labels: ["<=300", "300-800", "800-1500", "1500-5000", ">5000"]
+
 
     # ======= 候选层 5：月份（季度层）=======
     # - level: 5
@@ -95,6 +89,14 @@ BTTWD:
       col: "CRSDepTime"
       bins: [600,1200,1800,2400]
       labels: ["night","morning","afternoon","evening","late"]
+
+          # ======= 候选层 4：航程距离 =======
+    - level: 4
+      name: "L2_distance"
+      type: "numeric_bin"                                       # 航程距离分箱
+      col: "Distance"
+      bins: [300, 800, 1500, 5000]
+      labels: ["<=300", "300-800", "800-1500", "1500-5000", ">5000"]
 
   min_bucket_size: 50                                          # 叶子桶最小样本数，小于则回退
   max_levels: 3                                                 # 桶树最大层数（类似 XGBoost 的 max_depth）
