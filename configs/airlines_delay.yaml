@@ -2,8 +2,8 @@
 
 DATA:
   dataset_name: "airlines_delay_1m"                              # 数据集名称
-  raw_path: "../data/airline/airlines_train_regression_200000.csv" # 数据文件路径（相对仓库根目录）
-  file_type: "csv"                                               # 数据文件类型：ARFF
+  raw_path: "../data/airline/airlines_train_regression_1000000.arff" # 数据文件路径（相对仓库根目录）
+  file_type: "arff"                                               # 数据文件类型：ARFF
   target_col: "DepDelay"                                         # 原始目标列（延误分钟，回归值）
   target_transform:                                               # 将回归值转为二分类标签
     type: "threshold_binary"                                     # 按阈值二分类
@@ -61,7 +61,7 @@ BTTWD:
       name: "L2_origin"
       type: "categorical_group"                               # 按起飞机场分组
       col: "Origin"
-      min_count: 2000
+      min_count: 3000
       other_label: "OTHER"
 
     # ======= 候选层 3：目的机场 =======
@@ -96,18 +96,18 @@ BTTWD:
       bins: [600,1200,1800,2400]
       labels: ["night","morning","afternoon","evening","late"]
 
-  min_bucket_size: 500                                          # 叶子桶最小样本数，小于则回退
-  max_levels: 4                                                 # 桶树最大层数（类似 XGBoost 的 max_depth）
+  min_bucket_size: 50                                          # 叶子桶最小样本数，小于则回退
+  max_levels: 3                                                 # 桶树最大层数（类似 XGBoost 的 max_depth）
   use_gain: true                                                # 是否启用桶增益判定
-  min_gain_for_split: 0.000                                       # 桶级增益阈值，小于该值则不继续细分
-  gamma_bucket: 0.000                                             # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
+  min_gain_for_split: -0.006                                      # 桶级增益阈值，小于该值则不继续细分
+  gamma_bucket: 0.00                                             # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
   bucket_subsample: 0.7                                          # 桶内随机采样比例（类似 XGBoost 的 subsample）
   max_train_samples_per_bucket: 20000                            # 每个桶最多用于训练的样本数
-  score_metric: "bac_regret"                                      # 增益评分指标，当前为 BAC - Regret
-  parent_share_rate: 0.1                                         # 子桶回流到父桶的比例
-  min_parent_share: 200                                         # 父桶至少回流样本数
-  val_ratio: 0.2                                                 # 桶内验证集比例
-  min_val_samples_per_bucket: 30                                # 桶内最少验证样本
+  score_metric: "bac"                                      # 增益评分指标，当前为 BAC - Regret
+  parent_share_rate: 0.2                                         # 子桶回流到父桶的比例
+  min_parent_share: 60                                         # 父桶至少回流样本数
+  val_ratio: 0.3                                                 # 桶内验证集比例
+  min_val_samples_per_bucket: 20                                # 桶内最少验证样本
   use_global_backoff: true                                       # 桶或父桶无模型时是否使用全局模型
   global_estimator: "xgb"                                        # 全局模型类型（XGBoost）
   bucket_estimator: "none"                                        # 桶内模型类型
@@ -144,14 +144,14 @@ THRESHOLDS:
   objective: "regret"                                           # 优化指标（与 adult 保持一致）
   alpha_init: 0.6                                                # 正类阈值初始值
   beta_init: 0.4                                                 # 负类阈值初始值
-  alpha_grid: [0.2,0.25,0.3,0.35,0.4,0.45,0.5, 0.55, 0.6, 0.65, 0.7,0.75, 0.8, 0.85, 0.9, 0.95]                        # α 搜索网格
-  beta_grid: [0.05,0.1,0.15,0.2,0.25, 0.3,0.35, 0.4, 0.45, 0.5]                          # β 搜索网格
+  alpha_grid: [0.2,0.3,0.4,0.5, 0.6, 0.7,0.8, 0.9]                        # α 搜索网格
+  beta_grid: [0.1,0.2, 0.3, 0.4, 0.5]                          # β 搜索网格
   gap_min: 0.05                                                  # α、β 最小间隔
   costs:                                                         # 三支决策成本
     C_TP: 0.0                                                    # 真正类成本
     C_TN: 0.0                                                    # 真负类成本
     C_FP: 1.0                                                    # 假正类成本（误报）
-    C_FN: 3.0                                                    # 假负类成本（漏报）
+    C_FN: 5.0                                                    # 假负类成本（漏报）
     C_BP: 1.5                                                    # 边界-正成本
     C_BN: 1.0                                                    # 边界-负成本
   min_samples_for_thresholds: 50                                # 触发阈值搜索的最少样本数
@@ -183,7 +183,7 @@ BASELINES:
     use_custom_threshold: true
     custom_threshold: 0.15
   xgboost:
-    n_estimators: 400                                            # 基线 XGBoost 树数
+    n_estimators: 300                                            # 基线 XGBoost 树数
     max_depth: 4                                                 # 树深
     learning_rate: 0.1                                           # 学习率
     subsample: 0.8                                               # 行采样
@@ -192,7 +192,7 @@ BASELINES:
     random_state: 42                                             # 随机种子
     n_jobs: -1                                                   # 并行线程
     use_custom_threshold: true
-    custom_threshold: 0.3
+    custom_threshold: 0.2
 
 EXP:
   kfold_repeats: 1                                               # K 折重复次数
