@@ -1,7 +1,7 @@
 DATA:
   dataset_name: "UNSW_NB15"
-  train_csv: "data/unsw/UNSW_NB15_training-set.csv"
-  test_csv: "data/unsw/UNSW_NB15_testing-set.csv"
+  train_csv: "../data/UNSW-NB15/UNSW_NB15_training-set.csv"
+  test_csv: "../data/UNSW-NB15/UNSW_NB15_testing-set.csv"
   sep: ","
   header: 0
   na_values: ["?", "NA", "NaN", ""]
