@@ -192,10 +192,11 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
                         "poutcome",
                     ],
                 )
-                log_info(
+                message = (
                     f"【数据加载】银行营销数据集已读取，标签已映射为0/1，样本数={len(df)}，"
                     f"正类比例={df[target_col].mean():.2%}"
                 )
+                log_info(message)
             else:
                 df = _load_csv_like(raw_path, data_cfg)
         elif file_type == "tsv":
