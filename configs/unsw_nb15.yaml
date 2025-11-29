@@ -1,105 +1,95 @@
+# UNSW-NB15 二分类配置（风格对齐其他 YAML）
+
 DATA:
-  dataset_name: "UNSW_NB15"
-  train_csv: "data/unsw/UNSW_NB15_training-set.csv"
-  test_csv: "data/unsw/UNSW_NB15_testing-set.csv"
-  sep: ","
-  header: 0
-  na_values: ["?", "NA", "NaN", ""]
-  target_col: "label"
-  positive_label: 1
-  feature_cols: null
-  drop_cols:
+  dataset_name: "UNSW_NB15"                                       # 数据集名称
+  train_csv: "../data/unsw/UNSW_NB15_training-set.csv"            # 训练集文件路径（相对仓库根目录）
+  test_csv: "../data/unsw/UNSW_NB15_testing-set.csv"              # 测试集文件路径（相对仓库根目录）
+  file_type: "csv"                                               # 数据文件类型
+  sep: ","                                                         # CSV 分隔符
+  header: 0                                                         # CSV 表头行号
+  na_values: ["?", "NA", "NaN", ""]                                # 需要视为缺失的取值
+  target_col: "label"                                             # 目标列名
+  positive_label: 1                                                 # 正类取值
+  feature_cols: null                                                # 手工指定特征列（null 表示自动推断）
+  drop_cols:                                                        # 需要直接丢弃的列
     - "id"
     - "attack_cat"
-  categorical_cols:
+  categorical_cols:                                                 # 类别特征列表
     - "proto"
     - "service"
     - "state"
-  target_transform: null
-  use_kfold: true
-  n_splits: 5
-  shuffle: true
-  random_state: 42
+  target_transform: null                                            # 目标变换（此处不做变换）
+  use_kfold: true                                                   # 是否在数据加载阶段使用 K 折
+  n_splits: 5                                                       # K 折折数
+  shuffle: true                                                     # K 折是否洗牌
+  stratify: true                                                    # K 折是否分层
+  random_state: 42                                                  # 随机种子
 
 PREPROCESS:
-  continuous_cols: null
-  categorical_cols:
+  continuous_cols: null                                             # 数值特征列表（null 表示自动识别非类别列）
+  categorical_cols:                                                 # 类别特征列表（与 DATA 保持一致）
     - "proto"
     - "service"
     - "state"
-  handle_missing: null
-  fillna_strategy: "most_frequent"
-  scale_continuous: true
-  scaler_type: "standard"
-  encoding_type: "onehot"
-  drop_first: false
-  save_feature_names: true
-  drop_cols: []
+  handle_missing: "question_mark"                                  # 缺失值标记处理方式
+  fillna_strategy: "most_frequent"                                  # 缺失填充策略
+  scale_continuous: true                                            # 是否缩放数值特征
+  scaler_type: "standard"                                          # 数值特征缩放器类型
+  encoding_type: "onehot"                                          # 类别编码方式
+  drop_first: false                                                 # One-Hot 是否去掉首列
+  drop_cols: []                                                     # 预处理阶段额外需要丢弃的列
+  save_feature_names: true                                          # 是否保存编码后的特征名
+
+SCORE:
+  bucket_score_mode: "bac_regret"                                  # 桶得分模式：综合 BAC 与 Regret
+  bac_weight: 1.0                                                   # BAC 权重
+  regret_weight: 1.0                                               # Regret 权重
+  regret_sign: -1.0                                                 # Regret 越小越好，取负号便于最大化
 
 BTTWD:
-  bucket_levels:
-    - name: "L1_proto"
-      type: "categorical_group"
+  bucket_levels:                                                    # 桶树候选层级
+    - level: 1
+      name: "L1_proto"
+      type: "categorical_group"                                   # 按协议类型分桶
       col: "proto"
-    - name: "L2_service"
-      type: "categorical_group"
+    - level: 2
+      name: "L2_service"
+      type: "categorical_group"                                   # 按服务分桶
       col: "service"
-  min_bucket_size: 5000
-  min_pos_per_bucket: 50
-  max_levels: 2
-  use_gain: true
-  min_gain_for_split: 0.005
-  gamma_bucket: 0.05
-  bucket_subsample: 0.7
-  max_train_samples_per_bucket: 30000
-  parent_share_rate: 0.0
-  min_parent_share: 0
-  val_ratio: 0.2
-  min_val_samples_per_bucket: 50
-  use_global_backoff: true
-  bucket_estimator: "none"
-  posterior_estimator: "logreg"
-  global_estimator: "xgb"
-  score_metric: "bac_regret"
-
-MODEL:
-  global_estimator: "xgb"
-  use_bucket_local_model: false
-  global_xgb:
-    n_estimators: 400
-    max_depth: 5
-    learning_rate: 0.1
-    subsample: 0.8
-    colsample_bytree: 0.8
-    reg_lambda: 1.0
-    random_state: 42
-    n_jobs: -1
-  baselines:
-    - "logreg"
-    - "random_forest"
-    - "knn"
-    - "xgb"
-
-BASELINES:
-  common:
-    threshold_mode: "fixed"
-    fixed_threshold: 0.5
-  logreg:
-    C: 1.0
-    max_iter: 300
-    use_custom_threshold: true
-    custom_threshold: 0.5
-  random_forest:
-    n_estimators: 300
+  min_bucket_size: 5000                                             # 叶子桶最小样本数，小于则回退
+  min_pos_per_bucket: 50                                            # 叶子桶最少正样本数
+  max_levels: 2                                                     # 桶树最大层数
+  use_gain: true                                                    # 是否启用桶增益判定
+  min_gain_for_split: 0.005                                         # 桶级增益阈值，小于该值不再细分
+  gamma_bucket: 0.05                                                # 子桶个数的复杂度惩罚（类似 XGBoost gamma）
+  bucket_subsample: 0.7                                             # 桶内样本随机采样比例
+  max_train_samples_per_bucket: 30000                               # 每个桶最多用于训练的样本数
+  parent_share_rate: 0.0                                            # 子桶向父桶回流的样本占比
+  min_parent_share: 0                                               # 回流到父桶的最少样本数
+  val_ratio: 0.2                                                    # 桶内验证集比例
+  min_val_samples_per_bucket: 50                                    # 桶内最少验证样本数
+  use_global_backoff: true                                          # 桶和父桶无模型时是否回退全局模型
+  global_estimator: "xgb"                                          # 全局兜底模型类型
+  bucket_estimator: "none"                                         # 桶内局部模型类型
+  posterior_estimator: "logreg"                                    # 后验估计或校准模型类型
+  logreg_C: 1.0                                                     # 桶内逻辑回归正则强度
+  knn_k: 10                                                         # 桶内 KNN 邻居数
+  score_metric: "bac_regret"                                       # 桶分裂时使用的得分指标
+  bucket_rf:                                                        # 桶内随机森林参数占位
+    n_estimators: 200
     max_depth: null
     random_state: 42
-    use_custom_threshold: true
-    custom_threshold: 0.5
-  knn:
-    n_neighbors: 20
-    use_custom_threshold: true
-    custom_threshold: 0.5
-  xgboost:
+    n_jobs: -1
+  bucket_xgb:                                                       # 桶内 XGBoost 参数占位
+    n_estimators: 200
+    max_depth: 3
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+  global_xgb:                                                       # 全局 XGBoost 模型参数
     n_estimators: 400
     max_depth: 5
     learning_rate: 0.1
@@ -108,43 +98,84 @@ BASELINES:
     reg_lambda: 1.0
     random_state: 42
     n_jobs: -1
+
+THRESHOLDS:
+  mode: "bucket_wise"                                              # 每个桶单独学习阈值
+  objective: "regret"                                             # 优化指标
+  alpha_init: 0.6                                                  # 正类阈值初始值
+  beta_init: 0.2                                                   # 负类阈值初始值
+  alpha_grid: []                                                   # α 搜索网格（为空则使用 init 搜索）
+  beta_grid: []                                                    # β 搜索网格（为空则使用 init 搜索）
+  search_grid_size: 50                                             # 随机搜索的候选数
+  gap_min: 0.0                                                     # α、β 之间的最小间隔
+  min_samples_for_thresholds: 100                                  # 触发阈值搜索的最少样本数
+  max_iter: 100                                                    # 阈值搜索最大迭代次数占位
+  costs:                                                           # 三支决策成本
+    C_TP: 0.0                                                      # 真正类成本
+    C_TN: 0.0                                                      # 真负类成本
+    C_FP: 1.0                                                      # 假正类成本（误报）
+    C_FN: 5.0                                                      # 假负类成本（漏报）
+    C_BP: 1.5                                                      # 边界-正成本
+    C_BN: 1.0                                                      # 边界-负成本
+
+BASELINES:
+  use_logreg: true                                                 # 是否跑逻辑回归基线
+  use_random_forest: true                                          # 是否跑随机森林基线
+  use_knn: true                                                    # 是否跑 KNN 基线
+  use_xgboost: true                                                # 是否跑 XGBoost 基线
+
+  common:
+    threshold_mode: "fixed"                                        # 阈值模式：固定 or 每模型单独
+    fixed_threshold: 0.5                                           # 全局默认阈值
+
+  logreg:
+    C: 1.0                                                         # 逻辑回归正则化强度
+    max_iter: 300                                                  # 最大迭代次数
     use_custom_threshold: true
     custom_threshold: 0.5
 
-THRESHOLDS:
-  mode: "bucket_wise"
-  costs:
-    C_TP: 0.0
-    C_TN: 0.0
-    C_FP: 1.0
-    C_FN: 5.0
-    C_BP: 1.5
-    C_BN: 1.0
-  alpha_init: 0.6
-  beta_init: 0.2
-  search_grid_size: 50
-  gap_min: 0.0
-  min_samples_for_thresholds: 100
+  random_forest:
+    n_estimators: 300                                              # 随机森林树数
+    max_depth: null                                                # 随机森林深度
+    random_state: 42                                               # 随机种子
+    use_custom_threshold: true
+    custom_threshold: 0.5
 
-EXPERIMENT:
-  use_kfold: true
-  n_splits: 5
-  random_state: 42
-  shuffle: true
+  knn:
+    n_neighbors: 20                                                # 基线 KNN 邻居数
+    use_custom_threshold: true
+    custom_threshold: 0.5
 
-OUTPUT:
-  results_dir: "results/unsw_nb15"
-  figs_dir: "results/unsw_nb15/figs"
-  logs_dir: "results/unsw_nb15/logs"
-  save_per_fold_metrics: true
-  save_bucket_metrics: true
-  save_config_copy: true
-  save_threshold_logs: true
-  threshold_log_filename: "bucket_thresholds_per_fold.csv"
+  xgboost:
+    n_estimators: 400                                              # 基线 XGBoost 树数
+    max_depth: 5                                                   # 树深
+    learning_rate: 0.1                                             # 学习率
+    subsample: 0.8                                                 # 行采样比例
+    colsample_bytree: 0.8                                          # 列采样比例
+    reg_lambda: 1.0                                                # L2 正则
+    random_state: 42                                               # 随机种子
+    n_jobs: -1                                                     # 并行线程数
+    use_custom_threshold: true
+    custom_threshold: 0.5
+
+EXP:
+  kfold_repeats: 1                                                 # K 折重复次数
+  n_jobs: -1                                                       # 全局并行线程
+  verbose: 1                                                       # 日志级别
 
 METRICS:
-  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret", "BND_ratio", "POS_Coverage"]
-  pos_label: 1
+  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret", "BND_ratio", "POS_Coverage"] # 评估指标
+  pos_label: 1                                                     # 指定正类标签
+
+OUTPUT:
+  results_dir: "results/unsw_nb15"                                # 结果输出目录
+  figs_dir: "results/unsw_nb15/figs"                              # 图表输出目录
+  logs_dir: "results/unsw_nb15/logs"                              # 日志输出目录
+  save_per_fold_metrics: true                                      # 是否保存分折指标
+  save_bucket_metrics: true                                        # 是否保存桶指标
+  save_config_copy: true                                           # 是否保存配置副本
+  save_threshold_logs: true                                        # 是否保存阈值搜索日志
+  threshold_log_filename: "bucket_thresholds_per_fold.csv"         # 阈值日志文件名
 
 SEED:
-  global_seed: 42
+  global_seed: 42                                                  # 全局随机种子
