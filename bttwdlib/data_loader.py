@@ -53,6 +53,7 @@ def _load_csv_like(path: str, data_cfg: dict) -> pd.DataFrame:
     header = data_cfg.get("header", "infer")
     names = data_cfg.get("col_names")
     skiprows = data_cfg.get("skiprows")
+    na_values = data_cfg.get("na_values")
     df = pd.read_csv(
         path,
         sep=sep,
@@ -60,6 +61,7 @@ def _load_csv_like(path: str, data_cfg: dict) -> pd.DataFrame:
         header=header,
         names=names,
         skiprows=skiprows,
+        na_values=na_values,
     )
     log_info(f"【数据加载】文本表格 {path} 已读取，样本数={len(df)}，列数={df.shape[1]}")
     return df
@@ -102,97 +104,151 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
     """根据配置加载数据集，支持 adult CSV、ARFF 以及多种表格格式。"""
 
     data_cfg = cfg.get("DATA", {})
+    train_csv = data_cfg.get("train_csv")
+    test_csv = data_cfg.get("test_csv")
     raw_path = data_cfg.get("raw_path") or data_cfg.get("path") or data_cfg.get("data_path")
     file_type_cfg = data_cfg.get("file_type")
     file_type = str(file_type_cfg).lower() if file_type_cfg is not None else ""
+    repo_root = Path(__file__).resolve().parent.parent
+
+    def _resolve_path(path_str: str | None):
+        if not path_str:
+            return None
+        p = Path(path_str)
+        if not p.is_absolute() and not p.exists():
+            alt_path = repo_root / p
+            if alt_path.exists():
+                return str(alt_path)
+        return str(p)
+
+    train_csv = _resolve_path(train_csv)
+    test_csv = _resolve_path(test_csv)
+
+    df = None
+
     if raw_path:
         raw_path_path = Path(raw_path)
         if not raw_path_path.is_absolute() and not raw_path_path.exists():
-            repo_root = Path(__file__).resolve().parent.parent
             alt_path = repo_root / raw_path_path
             if alt_path.exists():
                 raw_path_path = alt_path
         raw_path = str(raw_path_path)
 
+    if train_csv and test_csv:
+        train_df = _load_csv_like(train_csv, data_cfg)
+        test_df = _load_csv_like(test_csv, data_cfg)
+        train_df["split"] = "train"
+        test_df["split"] = "test"
+        df = pd.concat([train_df, test_df], ignore_index=True)
+        file_type = "csv"
+        raw_path = None
+        log_info(
+            "【数据加载】检测到显式 train/test 配置，" f"训练集 n={len(train_df)}，测试集 n={len(test_df)}"
+        )
+
     if not file_type and raw_path:
         file_type = Path(raw_path).suffix.lower().lstrip(".") or "csv"
     dataset_name = data_cfg.get("dataset_name", "dataset")
 
-    if raw_path is None:
+    if raw_path is None and df is None:
         raise FileNotFoundError("配置中缺少 raw_path/path 字段，无法读取数据")
 
-    if file_type == "arff":
-        df = _load_arff(raw_path)
-    elif file_type in {"csv", "txt"}:
-        dataset_name_lower = dataset_name.lower()
-        if dataset_name_lower == "adult":
-            df = load_adult_raw(cfg)
-        elif dataset_name_lower == "bank_full":
-            tmp_cfg = dict(data_cfg)
-            tmp_cfg.setdefault("sep", ";")
-            df = _load_csv_like(raw_path, tmp_cfg)
-            target_col = data_cfg.get("target_col", "y")
-            if target_col not in df.columns:
-                raise KeyError(f"银行数据集中未找到标签列 {target_col}")
-            y_raw = df[target_col].astype(str).str.strip().str.lower()
-            df[target_col] = y_raw.map({"yes": 1, "no": 0})
-            if df[target_col].isna().any():
-                raise ValueError("银行数据集的标签列存在无法识别的取值（非 yes/no）")
-            df[target_col] = df[target_col].astype(int)
-            data_cfg["positive_label"] = 1
-            data_cfg.setdefault("negative_label", 0)
-            data_cfg.setdefault(
-                "numeric_cols",
-                ["age", "balance", "day", "duration", "campaign", "pdays", "previous"],
-            )
-            data_cfg.setdefault(
-                "categorical_cols",
-                [
-                    "job",
-                    "marital",
-                    "education",
-                    "default",
-                    "housing",
-                    "loan",
-                    "contact",
-                    "month",
-                    "poutcome",
-                ],
-            )
-            log_info(
-                "【数据加载】银行营销数据集已读取，标签已映射为0/1，"
-                f"样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
-            )
+    if raw_path is not None or df is None:
+        if file_type == "arff":
+            df = _load_arff(raw_path)
+        elif file_type in {"csv", "txt"}:
+            dataset_name_lower = dataset_name.lower()
+            if dataset_name_lower == "adult":
+                df = load_adult_raw(cfg)
+            elif dataset_name_lower == "bank_full":
+                tmp_cfg = dict(data_cfg)
+                tmp_cfg.setdefault("sep", ";")
+                df = _load_csv_like(raw_path, tmp_cfg)
+                target_col = data_cfg.get("target_col", "y")
+                if target_col not in df.columns:
+                    raise KeyError(f"银行数据集中未找到标签列 {target_col}")
+                y_raw = df[target_col].astype(str).str.strip().str.lower()
+                df[target_col] = y_raw.map({"yes": 1, "no": 0})
+                if df[target_col].isna().any():
+                    raise ValueError("银行数据集的标签列存在无法识别的取值（非 yes/no）")
+                df[target_col] = df[target_col].astype(int)
+                data_cfg["positive_label"] = 1
+                data_cfg.setdefault("negative_label", 0)
+                data_cfg.setdefault(
+                    "numeric_cols",
+                    ["age", "balance", "day", "duration", "campaign", "pdays", "previous"],
+                )
+                data_cfg.setdefault(
+                    "categorical_cols",
+                    [
+                        "job",
+                        "marital",
+                        "education",
+                        "default",
+                        "housing",
+                        "loan",
+                        "contact",
+                        "month",
+                        "poutcome",
+                    ],
+                )
+                log_info(
+                    "【数据加载】银行营销数据集已读取，标签已映射为0/1，"
+                    f"样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
+                )
+            else:
+                df = _load_csv_like(raw_path, data_cfg)
+        elif file_type == "tsv":
+            tmp = dict(data_cfg)
+            tmp.setdefault("sep", "\t")
+            df = _load_csv_like(raw_path, tmp)
+        elif file_type in {"dat", "data"}:
+            tmp = dict(data_cfg)
+            tmp.setdefault("sep", None)
+            df = _load_csv_like(raw_path, tmp)
+        elif file_type == "parquet":
+            df = pd.read_parquet(raw_path)
+        elif file_type in {"feather"}:
+            df = pd.read_feather(raw_path)
+        elif file_type in {"excel", "xlsx", "xls"}:
+            sheet = data_cfg.get("sheet_name", 0)
+            df = pd.read_excel(raw_path, sheet_name=sheet)
+        elif file_type in {"json", "jsonl"}:
+            df = pd.read_json(raw_path, lines=True)
         else:
-            df = _load_csv_like(raw_path, data_cfg)
-    elif file_type == "tsv":
-        tmp = dict(data_cfg)
-        tmp.setdefault("sep", "\t")
-        df = _load_csv_like(raw_path, tmp)
-    elif file_type in {"dat", "data"}:
-        tmp = dict(data_cfg)
-        tmp.setdefault("sep", None)
-        df = _load_csv_like(raw_path, tmp)
-    elif file_type == "parquet":
-        df = pd.read_parquet(raw_path)
-    elif file_type in {"feather"}:
-        df = pd.read_feather(raw_path)
-    elif file_type in {"excel", "xlsx", "xls"}:
-        sheet = data_cfg.get("sheet_name", 0)
-        df = pd.read_excel(raw_path, sheet_name=sheet)
-    elif file_type in {"json", "jsonl"}:
-        df = pd.read_json(raw_path, lines=True)
-    else:
-        raise ValueError(f"未知的 file_type={file_type}")
+            raise ValueError(f"未知的 file_type={file_type}")
 
     df, target_col = _apply_target_transform(df, data_cfg)
 
+    feature_cols = data_cfg.get("feature_cols")
+    drop_cols = set(data_cfg.get("drop_cols", []) or [])
+    split_col = "split" if "split" in df.columns else None
+    cols_to_keep = set(df.columns)
+    if feature_cols:
+        cols_to_keep = set(feature_cols + [target_col])
+        if split_col:
+            cols_to_keep.add(split_col)
+    df = df[[c for c in df.columns if c in cols_to_keep and c not in drop_cols]].copy()
+
     positive_label = data_cfg.get("positive_label")
+    negative_label = data_cfg.get("negative_label")
     if positive_label is not None and target_col in df.columns:
-        pos_rate = (df[target_col] == positive_label).mean()
-        log_info(
-            f"【数据集信息】名称={dataset_name}，样本数={len(df)}，目标列={target_col}，正类比例={pos_rate:.2%}"
-        )
+        if negative_label is None:
+            df[target_col] = df[target_col].apply(lambda v: 1 if v == positive_label else 0)
+        else:
+            df[target_col] = df[target_col].apply(lambda v: 1 if v == positive_label else 0 if v == negative_label else v)
+        df[target_col] = df[target_col].astype(int)
+
+    if positive_label is not None and target_col in df.columns:
+        train_mask = df["split"].str.lower() == "train" if "split" in df.columns else None
+        test_mask = df["split"].str.lower() == "test" if "split" in df.columns else None
+        pos_rate = (df[target_col] == 1).mean()
+        msg = f"【数据集信息】名称={dataset_name}，样本数={len(df)}，目标列={target_col}，正类比例={pos_rate:.2%}"
+        if train_mask is not None:
+            msg += f"；训练集正类比例={(df.loc[train_mask, target_col] == 1).mean():.2%}"
+        if test_mask is not None:
+            msg += f"；测试集正类比例={(df.loc[test_mask, target_col] == 1).mean():.2%}"
+        log_info(msg)
     else:
         log_info(f"【数据集信息】名称={dataset_name}，样本数={len(df)}，目标列={target_col}")
 

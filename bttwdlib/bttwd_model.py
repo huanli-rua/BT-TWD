@@ -31,6 +31,7 @@ class BTTWDModel:
         thresh_cfg = cfg.get("THRESHOLDS", {})
 
         self.min_bucket_size = bcfg.get("min_bucket_size", 50)
+        self.min_pos_per_bucket = bcfg.get("min_pos_per_bucket", 0)
         self.max_levels = bcfg.get("max_levels", bcfg.get("max_depth", 10))
         self.min_gain_for_split = bcfg.get("min_gain_for_split", 0.0)
         self.use_gain = bcfg.get("use_gain", True)
@@ -390,6 +391,16 @@ class BTTWDModel:
             child_values = child_series.iloc[idx_all]
             child_groups = {cid: idxs.to_numpy() for cid, idxs in child_values.groupby(child_values).groups.items()}
 
+            if self.min_pos_per_bucket > 0:
+                child_pos_counts = {cid: int(np.sum(y[cidx])) for cid, cidx in child_groups.items()}
+                low_pos_children = {cid: cnt for cid, cnt in child_pos_counts.items() if cnt < self.min_pos_per_bucket}
+                if low_pos_children:
+                    log_bt(
+                        f"[BT] 子桶正类数不足（{low_pos_children}，阈值={self.min_pos_per_bucket}），放弃当前分裂"
+                    )
+                    leaf_index_map[bucket_id] = idx_all
+                    continue
+
             parent_metrics = self._calc_bucket_metrics(proba_all[idx_all], y[idx_all])
             parent_score = compute_bucket_score(parent_metrics, self.score_cfg)
             child_scores = []
@@ -419,7 +430,7 @@ class BTTWDModel:
 
         return leaf_index_map, visited_parent, bucket_index_map
 
-    def _build_bucket_tree_simple(self, bucket_ids) -> tuple[dict, dict, dict]:
+    def _build_bucket_tree_simple(self, bucket_ids, y: np.ndarray) -> tuple[dict, dict, dict]:
         """不计算 Gain 的固定分层桶树逻辑。"""
 
         log_bt("Gain 开关关闭(use_gain=False)，跳过增益判定，按固定规则细分桶树")
@@ -471,6 +482,16 @@ class BTTWDModel:
             child_values = child_series.iloc[idx_all]
             child_groups = {cid: idxs.to_numpy() for cid, idxs in child_values.groupby(child_values).groups.items()}
 
+            if self.min_pos_per_bucket > 0:
+                child_pos_counts = {cid: int(np.sum(y[cidx])) for cid, cidx in child_groups.items()}
+                low_pos_children = {cid: cnt for cid, cnt in child_pos_counts.items() if cnt < self.min_pos_per_bucket}
+                if low_pos_children:
+                    log_bt(
+                        f"[BT] 子桶正类数不足（{low_pos_children}，阈值={self.min_pos_per_bucket}），放弃当前分裂"
+                    )
+                    leaf_index_map[bucket_id] = idx_all
+                    continue
+
             queue.extend((cid, child_level) for cid in child_groups.keys())
 
         return leaf_index_map, visited_parent, bucket_index_map
@@ -478,7 +499,7 @@ class BTTWDModel:
     def _build_bucket_tree(self, bucket_ids, proba_all: np.ndarray, y: np.ndarray):
         if self.use_gain:
             return self._build_bucket_tree_with_gain(bucket_ids, proba_all, y)
-        return self._build_bucket_tree_simple(bucket_ids)
+        return self._build_bucket_tree_simple(bucket_ids, y)
 
     def fit(self, X: np.ndarray, y: np.ndarray, X_df_for_bucket: pd.DataFrame):
         log_info(
