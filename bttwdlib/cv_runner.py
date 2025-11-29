@@ -3,8 +3,20 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+
+try:
+    from xgboost import XGBClassifier
+
+    _XGB_AVAILABLE = True
+except ImportError:  # pragma: no cover - optional dependency
+    XGBClassifier = None
+    _XGB_AVAILABLE = False
 from .bttwd_model import BTTWDModel
 from .baselines import (
+    get_decision_threshold,
     train_eval_knn,
     train_eval_logreg,
     train_eval_random_forest,
@@ -19,6 +31,84 @@ from .metrics import (
 from .threshold_search import compute_regret
 from .utils_logging import log_info
 
+
+def _select_baselines(cfg: dict) -> set[str]:
+    """根据配置确定需要运行的基线模型集合。"""
+
+    model_cfg = cfg.get("MODEL", {})
+    baseline_list = model_cfg.get("baselines") or []
+    if isinstance(baseline_list, (list, tuple)) and baseline_list:
+        return {str(x).lower() for x in baseline_list}
+
+    base_cfg = cfg.get("BASELINES", {})
+    selected = set()
+    if base_cfg.get("use_logreg"):
+        selected.add("logreg")
+    if base_cfg.get("use_random_forest"):
+        selected.add("random_forest")
+    if base_cfg.get("use_knn"):
+        selected.add("knn")
+    if base_cfg.get("use_xgboost"):
+        selected.add("xgb")
+    return selected
+
+
+def _build_baseline_estimator(model_key: str, cfg: dict):
+    base_cfg = cfg.get("BASELINES", {})
+    if model_key == "logreg":
+        model_cfg = base_cfg.get("logreg", {})
+        return LogisticRegression(max_iter=model_cfg.get("max_iter", 200), C=model_cfg.get("C", 1.0))
+    if model_key == "random_forest":
+        rf_cfg = base_cfg.get("random_forest", {})
+        return RandomForestClassifier(
+            n_estimators=rf_cfg.get("n_estimators", 200),
+            max_depth=rf_cfg.get("max_depth"),
+            random_state=rf_cfg.get("random_state", 42),
+            n_jobs=cfg.get("EXP", {}).get("n_jobs", -1),
+        )
+    if model_key == "knn":
+        knn_cfg = base_cfg.get("knn", {})
+        return KNeighborsClassifier(n_neighbors=knn_cfg.get("n_neighbors", 10))
+    if model_key in {"xgb", "xgboost"}:
+        if not _XGB_AVAILABLE:
+            raise RuntimeError("配置了 XGBoost 基线但未安装 xgboost，请先安装。")
+        xgb_cfg = base_cfg.get("xgboost", {})
+        return XGBClassifier(
+            n_estimators=xgb_cfg.get("n_estimators", 300),
+            max_depth=xgb_cfg.get("max_depth", 4),
+            learning_rate=xgb_cfg.get("learning_rate", 0.1),
+            subsample=xgb_cfg.get("subsample", 0.8),
+            colsample_bytree=xgb_cfg.get("colsample_bytree", 0.8),
+            reg_lambda=xgb_cfg.get("reg_lambda", 1.0),
+            random_state=xgb_cfg.get("random_state", 42),
+            n_jobs=xgb_cfg.get("n_jobs", -1),
+            eval_metric="logloss",
+            use_label_encoder=False,
+        )
+    raise ValueError(f"未知的基线模型类型 {model_key}")
+
+
+def _eval_baseline_holdout(model_key: str, X_train, y_train, X_test, y_test, cfg, costs: dict | None = None) -> dict:
+    clf = _build_baseline_estimator(model_key, cfg)
+    threshold, mode, used_custom = get_decision_threshold(model_key if model_key != "xgb" else "xgboost", cfg)
+    log_info(
+        f"【基线-{model_key}】使用决策阈值={threshold:.3f}，模式={mode}，"
+        f"自定义阈值={'是' if used_custom else '否'}，开始在测试集评估"
+    )
+    clf.fit(X_train, y_train)
+    if hasattr(clf, "predict_proba"):
+        y_score = clf.predict_proba(X_test)[:, 1]
+        y_pred = (y_score >= threshold).astype(int)
+    else:
+        y_pred = clf.predict(X_test)
+        y_score = np.zeros_like(y_pred, dtype=float)
+
+    metrics_cfg = cfg.get("METRICS", {})
+    metrics_dict = compute_binary_metrics(y_test, y_pred, y_score, metrics_cfg, costs=costs)
+    metrics_dict.setdefault("BND_ratio", 0.0)
+    metrics_dict.setdefault("POS_Coverage", float("nan"))
+    metrics_dict["model"] = model_key
+    return metrics_dict
 
 def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None):
     """训练/评估单次切分的 BTTWD 模型并返回指标。"""
@@ -80,7 +170,7 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None):
     return {"metrics_s3": metrics_s3, "metrics_binary": metrics_binary}
 
 
-def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
+def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None) -> dict:
     repo_root = Path(__file__).resolve().parent.parent
     configured_results_dir = cfg.get("OUTPUT", {}).get("results_dir", "results")
     results_dir = Path(configured_results_dir)
@@ -100,13 +190,16 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
 
     # 运行基线整体（使用 cross_val_predict）
     baseline_results = {}
-    if cfg.get("BASELINES", {}).get("use_logreg", False):
+    baseline_holdout_results = {}
+    test_holdout_records: list[dict] = []
+    baseline_set = _select_baselines(cfg)
+    if "logreg" in baseline_set:
         baseline_results["LogReg"] = train_eval_logreg(X, y, cfg, skf, costs=threshold_costs)
-    if cfg.get("BASELINES", {}).get("use_random_forest", False):
+    if "random_forest" in baseline_set:
         baseline_results["RandomForest"] = train_eval_random_forest(X, y, cfg, skf, costs=threshold_costs)
-    if cfg.get("BASELINES", {}).get("use_knn", False):
+    if "knn" in baseline_set:
         baseline_results["KNN"] = train_eval_knn(X, y, cfg, skf, costs=threshold_costs)
-    if cfg.get("BASELINES", {}).get("use_xgboost", False):
+    if "xgb" in baseline_set or "xgboost" in baseline_set:
         baseline_results["XGBoost"] = train_eval_xgboost(X, y, cfg, skf, costs=threshold_costs)
 
     fold_idx = 1
@@ -200,8 +293,55 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
             for rec in res["per_fold"]:
                 per_fold_records.append({"model": model_name, **rec})
 
+    if test_data is not None:
+        X_test, y_test, bucket_df_test = test_data
+        bucket_df_test = bucket_df_test.reset_index(drop=True)
+        log_info(
+            f"【Holdout】检测到外部测试集，训练集 n={len(X)}, 测试集 n={len(X_test)}，开始全量训练后评估"
+        )
+        bttwd_final = BTTWDModel.from_cfg(cfg, feature_names=X_df_for_bucket.columns.tolist())
+        bttwd_final.fit(X, y, X_df_for_bucket.reset_index(drop=True))
+        y_score_final = bttwd_final.predict_proba(X_test, bucket_df_test)
+        y_pred_final = bttwd_final.predict(X_test, bucket_df_test)
+        if threshold_costs:
+            y_pred_binary_final = predict_binary_by_cost(y_score_final, threshold_costs)
+        else:
+            y_pred_binary_final = np.where(y_pred_final == 1, 1, 0)
+
+        metrics_s3_test = compute_s3_metrics(
+            y_test, y_pred_final, y_score_final, cfg.get("METRICS", {}), costs=threshold_costs
+        )
+        metrics_binary_test = compute_binary_metrics(
+            y_test, y_pred_binary_final, y_score_final, cfg.get("METRICS", {}), costs=threshold_costs or None
+        )
+        metrics_s3_test.update({"model": "BTTWD", "fold": "test"})
+        for k, v in metrics_binary_test.items():
+            if k not in metrics_s3_test:
+                metrics_s3_test[k] = v
+        test_holdout_records.append(metrics_s3_test)
+        per_fold_records.append(metrics_s3_test)
+        log_metrics("【BTTWD-测试集】", metrics_s3_test)
+
+        for base_key in baseline_set:
+            res = _eval_baseline_holdout(base_key, X, y, X_test, y_test, cfg, costs=threshold_costs or None)
+            res["fold"] = "test"
+            baseline_holdout_results[base_key] = res
+            per_fold_records.append(res)
+
     summary_df = pd.DataFrame(summary_rows)
     per_fold_output_df = pd.DataFrame(per_fold_records)
+
+    overview_records = []
+    if test_holdout_records or baseline_holdout_results:
+        overview_records.extend(test_holdout_records)
+        overview_records.extend(baseline_holdout_results.values())
+    else:
+        for row in summary_rows:
+            base_row = {"model": row.get("model")}
+            for k, v in row.items():
+                if k.endswith("_mean"):
+                    base_row[k[:-5]] = v
+            overview_records.append(base_row)
 
     # 写文件
     if cfg.get("OUTPUT", {}).get("save_per_fold_metrics", True):
@@ -217,6 +357,8 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg) -> dict:
         pd.concat(threshold_log_records, ignore_index=True).to_csv(
             os.path.join(results_dir, th_filename), index=False
         )
+    if overview_records:
+        pd.DataFrame(overview_records).to_csv(os.path.join(results_dir, "metrics_overview.csv"), index=False)
     log_info("【K折实验】所有结果已写入 results 目录")
 
     return {"baselines": baseline_results, "bttwd": {"per_fold": per_fold_records, "summary": summary_rows}}
