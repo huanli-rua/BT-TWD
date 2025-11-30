@@ -59,6 +59,25 @@ class BucketTree:
         log_info(f"【桶树】已为样本生成桶ID，共 {bucket_id.nunique()} 个组合")
         return bucket_id
 
+    def assign_bucket_parts(self, X_df: pd.DataFrame) -> list[pd.Series]:
+        """返回每一层的桶标签序列，便于增量式分裂逻辑使用。"""
+
+        parts = []
+        for level_cfg in self.levels_cfg:
+            col = level_cfg.get("col") or level_cfg.get("feature")
+            part = self._assign_single_level(X_df[col], level_cfg)
+            unknown_mask = part.isna()
+            if unknown_mask.any():
+                log_info(f"【桶树】列 {col} 出现未知取值，{unknown_mask.sum()} 条记录记为 unknown")
+                part = part.astype(object).fillna("unknown")
+            level_num = level_cfg.get("level")
+            if level_num is not None:
+                level_name = f"L{level_num}_{col}"
+            else:
+                level_name = level_cfg.get("name", col)
+            parts.append(part.astype(str).apply(lambda v: f"{level_name}={v}"))
+        return parts
+
     def get_level_names(self) -> list[str]:
         return [lvl.get("name") for lvl in self.levels_cfg]
 
