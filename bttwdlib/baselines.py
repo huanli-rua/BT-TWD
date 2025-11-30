@@ -143,6 +143,11 @@ def _run_baseline_cv(
     fold_idx = 1
     for train_idx, test_idx in splitter.split(X, y):
         clf = model_builder()
+        y_train = y[train_idx]
+        if np.unique(y_train).size < 2:
+            log_info(f"【基线-{model_name}】第 {fold_idx} 折训练集仅包含单一类别，跳过该折")
+            fold_idx += 1
+            continue
         clf.fit(X[train_idx], y[train_idx])
 
         if hasattr(clf, "predict_proba"):
