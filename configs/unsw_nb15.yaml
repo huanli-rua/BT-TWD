@@ -41,7 +41,7 @@ PREPROCESS:
   save_feature_names: true                                          # 是否保存编码后的特征名
 
 SCORE:
-  bucket_score_mode: "bac_regret"                                  # 桶得分模式：综合 BAC 与 Regret
+  bucket_score_mode: "bac_regret"                                  # BAC 和 regret 同权重，得分越高表示桶本身越“有价值”，主要用于弱桶和增益日志分析
   bac_weight: 1.0                                                   # BAC 权重
   regret_weight: 1.0                                               # Regret 权重
   regret_sign: -1.0                                                 # Regret 越小越好，取负号便于最大化
@@ -56,16 +56,16 @@ BTTWD:
       name: "L2_service"
       type: "categorical_group"                                   # 按服务分桶
       col: "service"
-  min_bucket_size: 50                                            # 叶子桶最小样本数，小于则回退
-  min_pos_per_bucket: 5                                           # 叶子桶最少正样本数
-  max_levels: 2                                                     # 桶树最大层数
-  use_gain: true                                                    # 是否启用桶增益判定
-  min_gain_for_split: 0.005                                         # 桶级增益阈值，小于该值不再细分
+  min_bucket_size: 50                                            # 分桶停止条件之一：样本数 < 50 不再细分
+  min_pos_per_bucket: 5                                           # 分桶停止条件之二：正样本数 < 5 不再细分
+  max_levels: 2                                                     # 只允许两层区域划分，第三层之后强制停止（与增益无关）
+  use_gain: true                                                    # 增益只用于弱桶判定：gain < 阈值 视为弱桶，阈值/决策优先回退
+  min_gain_for_split: 0.005                                         # 增益只用于弱桶判定：gain < 0.005 的桶视为弱桶，阈值/决策优先回退到父桶/ROOT
   gamma_bucket: 0.05                                                # 子桶个数的复杂度惩罚（类似 XGBoost gamma）
   bucket_subsample: 0.7                                             # 桶内样本随机采样比例
   max_train_samples_per_bucket: 30000                               # 每个桶最多用于训练的样本数
-  parent_share_rate: 0.0                                            # 子桶向父桶回流的样本占比
-  min_parent_share: 0                                               # 回流到父桶的最少样本数
+  parent_share_rate: 0.0                                            # 当前代码未用，预留占位
+  min_parent_share: 0                                               # 当前代码未用，预留占位
   val_ratio: 0.2                                                    # 桶内验证集比例
   min_val_samples_per_bucket: 50                                    # 桶内最少验证样本数
   use_global_backoff: true                                          # 桶和父桶无模型时是否回退全局模型
@@ -100,15 +100,15 @@ BTTWD:
     n_jobs: -1
 
 THRESHOLDS:
-  mode: "bucket_wise"                                              # 每个桶单独学习阈值
-  objective: "regret"                                             # 优化指标
+  thresholds_mode: "bucket_wise"                                  # 阈值模式，目前只支持 bucket_wise；字段名要和代码中的 thresholds_mode 对齐
+  objective: "regret"                                             # 当前实现固定以 regret 为主目标，BAC/F1/BND 仅作 tie-breaker
   alpha_init: 0.6                                                  # 正类阈值初始值
   beta_init: 0.2                                                   # 负类阈值初始值
-  alpha_grid: []                                                   # α 搜索网格（为空则使用 init 搜索）
-  beta_grid: []                                                    # β 搜索网格（为空则使用 init 搜索）
-  search_grid_size: 50                                             # 随机搜索的候选数
-  gap_min: 0.0                                                     # α、β 之间的最小间隔
-  min_samples_for_thresholds: 100                                  # 触发阈值搜索的最少样本数
+  alpha_grid: []                                                   # 留空表示以 alpha_init 为中心随机采样 search_grid_size 个候选 α
+  beta_grid: []                                                    # 留空表示以 beta_init 为中心随机采样 search_grid_size 个候选 β
+  search_grid_size: 50                                             # 随机候选阈值的组合数
+  gap_min: 0.0                                                     # α、β 最小间隔限制，0 表示允许 α=β（即没有 BND 区间）
+  min_samples_for_thresholds: 100                                  # 桶内验证样本 ≥ 100 才触发该桶的随机阈值搜索，否则直接继承父桶/ROOT 阈值
   max_iter: 100                                                    # 阈值搜索最大迭代次数占位
   costs:                                                           # 三支决策成本
     C_TP: 0.0                                                      # 真正类成本
@@ -171,6 +171,7 @@ OUTPUT:
   results_dir: "results/unsw_nb15"                                # 结果输出目录
   figs_dir: "results/unsw_nb15/figs"                              # 图表输出目录
   logs_dir: "results/unsw_nb15/logs"                              # 日志输出目录
+  # BTTWDModel 导出的 bucket_tree_structure.csv、bucket_metrics_gain.csv、bucket_thresholds.csv、bucket_fallback_stats.csv 会统一写到 results_dir
   save_per_fold_metrics: true                                      # 是否保存分折指标
   save_bucket_metrics: true                                        # 是否保存桶指标
   save_config_copy: true                                           # 是否保存配置副本

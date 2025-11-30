@@ -36,7 +36,7 @@ PREPROCESS:
   save_feature_names: true
 
 SCORE:
-  bucket_score_mode: "bac"
+  bucket_score_mode: "bac_regret"      # 桶得分模式：综合 BAC 与 regret，供弱桶判定和增益计算使用，不直接控制分裂
   bac_weight: 1.0
   regret_weight: 1.0
   regret_sign: -1.0
@@ -68,17 +68,17 @@ BTTWD:
       # 示例分法：<35 = 低工时，35-45 = 标准工作，>45 = 加班型
       bins: [35, 45]
       labels: ["low_hours", "normal_hours", "high_hours"]
-  min_bucket_size: 100              # 叶子桶若不足该数量就不单独建模，直接并入父桶
-  max_levels: 3                     # 桶树最大层数（类似 XGBoost 的 max_depth）
-  use_gain: true                    # 是否启用桶增益判定
-  min_gain_for_split: -0.05         # 桶级增益阈值，小于该值则不继续细分
+  min_bucket_size: 100              # 叶子桶最少样本数，分裂是否继续只由该值和 max_levels 决定
+  max_levels: 3                     # 桶树最大层数，达到该层后不再细分（与 gain 无关）
+  use_gain: true                    # 预留参数，目前代码中分桶不再依赖 gain，只在弱桶判定和回退统计中使用增益信息
+  min_gain_for_split: -0.05         # 用于弱桶判定的增益阈值：增益 < 该值 的桶会被标记为弱桶，阈值回退到父桶/全局
   gamma_bucket: 0.000                # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
   bucket_subsample: 0.7             # 桶内样本随机采样比例（类似 XGBoost 的 subsample）
   max_train_samples_per_bucket: 20000 # 每个桶最多用于训练的样本数
-  parent_share_rate: 0.2           # 大桶向父桶贡献的样本比例
-  min_parent_share: 50             # 大桶向父桶贡献样本的最少数量
-  val_ratio: 0.3                   # 训练集中按该比例划分验证集用来选阈值
-  min_val_samples_per_bucket: 20   # 每个桶用于阈值搜索的最少验证集样本数
+  parent_share_rate: 0.2           # 预留参数，当前版本代码未使用父桶样本回流逻辑，仅作为以后扩展用
+  min_parent_share: 50             # 预留参数，当前版本代码未使用父桶样本回流逻辑，仅作为以后扩展用
+  val_ratio: 0.3                   # 只要桶内验证集样本数 >= min_val_samples_per_bucket，就会在该桶上单独搜阈值；否则标记为弱桶，阈值回退
+  min_val_samples_per_bucket: 20   # 只要桶内验证集样本数 >= min_val_samples_per_bucket，就会在该桶上单独搜阈值；否则标记为弱桶，阈值回退
   use_global_backoff: true         # 若桶和父桶都没有模型时是否回退使用全局模型
   global_estimator: "xgb"          # 全局兜底模型类型：logreg/xgb/rf/knn/nb/none（缺省为logreg）
   bucket_estimator: "none"         # 桶内局部模型类型：logreg/xgb/rf/knn/nb/none（缺省为logreg）
@@ -110,9 +110,9 @@ BTTWD:
     n_jobs: -1                     # 并行线程数
 
 THRESHOLDS:
-  mode: "bucket_wise"
-  objective: "regret"
-  alpha_grid: [0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95]   # α 候选
+  thresholds_mode: "bucket_wise"   # 阈值模式，目前只支持 bucket_wise；字段名要和代码中的 thresholds_mode 对应
+  objective: "regret"              # 当前实现中总是以 regret 为主优化目标，BAC/F1/BND 仅作平局 tie-breaker，此字段仅做说明
+  alpha_grid: [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]   # α 候选，grid 是全局统一的候选网格，桶级只在这个网格上做搜索
   beta_grid:  [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]    # β 候选
   gap_min: 0.05
   costs:
@@ -122,7 +122,7 @@ THRESHOLDS:
     C_FN: 1.5                             # 假负类成本（漏报）
     C_BP: 0.75                              # 边界-正成本
     C_BN: 0.25                              # 边界-负成本
-  min_samples_for_thresholds: 100
+  min_samples_for_thresholds: 100   # 一个桶触发单独阈值搜索所需要的最少验证样本数（不足则直接回退父桶/ROOT 阈值）
 
 
 BASELINES:
@@ -173,7 +173,7 @@ METRICS:
   pos_label: 1
 
 OUTPUT:
-  results_dir: "results"
+  results_dir: "results/adult_bttwd"   # 结构 CSV 统一写到 results_dir 下，由 BTTWDModel 内部负责
   figs_dir: "figs"
   save_per_fold_metrics: true
   save_bucket_metrics: true
