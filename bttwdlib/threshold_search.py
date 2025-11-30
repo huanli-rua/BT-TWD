@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 
 
 def compute_regret(y_true, y_pred_s3, costs: dict) -> float:
@@ -69,6 +69,13 @@ def search_thresholds_with_regret(
     best_beta = None
     best_stats = None
 
+    auc_val = float("nan")
+    try:
+        if np.unique(y_true).size >= 2:
+            auc_val = float(roc_auc_score(y_true, prob))
+    except Exception:
+        auc_val = float("nan")
+
     for alpha in alpha_grid:
         for beta in beta_grid:
             if alpha < beta + gap_min:
@@ -84,14 +91,31 @@ def search_thresholds_with_regret(
             bnd_ratio = float(np.mean(preds == -1))
             pos_coverage = float(np.mean(preds == 1))
 
+            pos_mask = y_true == 1
+            neg_mask = ~pos_mask
+            tp = np.sum((preds == 1) & pos_mask)
+            tn = np.sum((preds == 0) & neg_mask)
+            tpr = tp / pos_mask.sum() if pos_mask.sum() > 0 else np.nan
+            tnr = tn / neg_mask.sum() if neg_mask.sum() > 0 else np.nan
+            if np.isnan(tpr) and np.isnan(tnr):
+                bac = np.nan
+            elif np.isnan(tpr):
+                bac = tnr / 2
+            elif np.isnan(tnr):
+                bac = tpr / 2
+            else:
+                bac = 0.5 * (tpr + tnr)
+
             stats = {
                 "regret": regret_val,
                 "precision": precision,
                 "recall": recall,
                 "f1": f1,
+                "bac": float(bac) if not np.isnan(bac) else np.nan,
                 "bnd_ratio": bnd_ratio,
                 "pos_coverage": pos_coverage,
                 "n_samples": int(len(prob)),
+                "auc": auc_val,
             }
 
             if best_stats is None:
