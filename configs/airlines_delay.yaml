@@ -46,7 +46,7 @@ PREPROCESS:
   save_feature_names: true                                       # 是否保存特征名
 
 SCORE:
-  bucket_score_mode: "bac_regret"
+  bucket_score_mode: "bac_regret"                                    # 增益只用于判定弱桶（是否回退阈值/模型），不再作为是否继续分裂的条件
   bac_weight: 1.0
   regret_weight: 1.0
   regret_sign: -1.0
@@ -104,17 +104,18 @@ BTTWD:
       bins: [300, 800, 1500, 5000]
       labels: ["<=300", "300-800", "800-1500", "1500-5000", ">5000"]
 
-  min_bucket_size: 50                                          # 叶子桶最小样本数，小于则回退
-  max_levels: 4                                                 # 桶树最大层数（类似 XGBoost 的 max_depth）
-  use_gain: true                                                # 是否启用桶增益判定
-  min_gain_for_split: -0.006                                      # 桶级增益阈值，小于该值则不继续细分
+  min_bucket_size: 50                                          # 分桶停止条件之一：当前桶样本数 < min_bucket_size 时不再继续往下分
+                                                               # 本数据集不单独限制每桶正样本数，分桶只看总样本数和层数
+  max_levels: 4                                                 # 桶树最大层数，达到后强制停止分裂，与 gain 无关
+  use_gain: true                                                # 预留参数，增益只参与弱桶判定和阈值回退，不影响是否分桶
+  min_gain_for_split: -0.006                                      # 用于弱桶判定的增益阈值：增益 < 该值 的桶会被标记为弱桶，阈值/模型回退父桶/全局
   gamma_bucket: 0.00                                             # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
   bucket_subsample: 0.7                                          # 桶内随机采样比例（类似 XGBoost 的 subsample）
   max_train_samples_per_bucket: 20000                            # 每个桶最多用于训练的样本数
-  parent_share_rate: 0.2                                         # 子桶回流到父桶的比例
-  min_parent_share: 60                                         # 父桶至少回流样本数
-  val_ratio: 0.3                                                 # 桶内验证集比例
-  min_val_samples_per_bucket: 20                                # 桶内最少验证样本
+  parent_share_rate: 0.2                                         # 预留参数，当前版本代码未使用父桶样本回流逻辑，仅作为以后扩展用
+  min_parent_share: 60                                         # 预留参数，当前版本代码未使用父桶样本回流逻辑，仅作为以后扩展用
+  val_ratio: 0.3                                                 # 只要桶内验证集样本数 >= min_val_samples_per_bucket，就单独搜阈值，否则记为弱桶回退
+  min_val_samples_per_bucket: 20                                # 只要桶内验证集样本数 >= min_val_samples_per_bucket，就单独搜阈值，否则记为弱桶回退
   use_global_backoff: true                                       # 桶或父桶无模型时是否使用全局模型
   global_estimator: "xgb"                                        # 全局模型类型（XGBoost）
   bucket_estimator: "none"                                        # 桶内模型类型
@@ -147,8 +148,8 @@ BTTWD:
     n_jobs: -1
 
 THRESHOLDS:
-  mode: "bucket_wise"                                            # 每个桶单独学习阈值
-  objective: "regret"                                           # 优化指标（与 adult 保持一致）
+  thresholds_mode: "bucket_wise"                                # 阈值模式，目前只支持 bucket_wise；字段名需与代码中的 thresholds_mode 对齐
+  objective: "regret"                                           # 当前实现固定以 regret 为主目标，BAC/F1/BND 仅作 tie-breaker
   alpha_init: 0.6                                                # 正类阈值初始值
   beta_init: 0.4                                                 # 负类阈值初始值
   alpha_grid: [0.2,0.3,0.4,0.5, 0.6, 0.7,0.8, 0.9]                        # α 搜索网格
@@ -161,7 +162,7 @@ THRESHOLDS:
     C_FN: 5.0                                                    # 假负类成本（漏报）
     C_BP: 1.5                                                    # 边界-正成本
     C_BN: 1.0                                                    # 边界-负成本
-  min_samples_for_thresholds: 50                                # 触发阈值搜索的最少样本数
+  min_samples_for_thresholds: 200                               # 桶内验证样本数 ≥ 200 才在该桶上单独搜索阈值，否则直接回退父桶/ROOT 阈值
   max_iter: 100                                                  # 阈值搜索最大迭代次数占位（兼容配置）
 
 BASELINES:
@@ -211,7 +212,7 @@ METRICS:
   pos_label: 1                                                   # 指定正类标签
 
 OUTPUT:
-  results_dir: "results"                                        # 结果输出目录
+  results_dir: "results/airlines_delay_1m"                      # BTTWDModel 导出的 bucket_* CSV 会写在这个目录下
   figs_dir: "figs"                                              # 图表输出目录
   save_per_fold_metrics: true                                    # 是否保存分折指标
   save_bucket_metrics: true                                      # 是否保存桶指标
