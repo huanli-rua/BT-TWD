@@ -1,6 +1,8 @@
+import os
 import numpy as np
 import pandas as pd
 from collections import defaultdict, deque
+from pathlib import Path
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
@@ -73,6 +75,10 @@ class BTTWDModel:
         self.bucket_info = {}
         self.bucket_stats = {}
         self.threshold_logs = []
+        self.bucket_structure_records: list[dict] = []
+        self.fallback_stats: dict[str, dict] = {}
+        self.results_dir = self._prepare_results_dir(cfg)
+        self.children_map: dict[str, list[str]] = {}
         self.global_model = None
         self.global_pos_rate = 0.5
         self.split_plan = {}
@@ -201,6 +207,20 @@ class BTTWDModel:
         merged_cfg.setdefault("regret_sign", -1.0)
         return merged_cfg
 
+    def _prepare_results_dir(self, cfg: dict) -> Path:
+        output_cfg = cfg.get("OUTPUT", {}) if isinstance(cfg, dict) else {}
+        base_dir = output_cfg.get("results_dir", "results")
+        results_dir = Path(base_dir)
+        if not results_dir.is_absolute():
+            results_dir = Path(__file__).resolve().parent.parent / results_dir
+
+        run_name = output_cfg.get("run_name")
+        if run_name:
+            results_dir = results_dir / str(run_name)
+
+        os.makedirs(results_dir, exist_ok=True)
+        return results_dir
+
     def _build_global_estimator(self):
         """构建全局后验估计器（例如 XGB）。"""
 
@@ -284,12 +304,17 @@ class BTTWDModel:
         return alpha, beta, stats
 
     def _get_threshold_with_backoff(self, bucket_id: str):
+        record = self.bucket_stats.get(bucket_id, {})
+        source_override = record.get("parent_with_threshold") or record.get("threshold_source_bucket")
+        if source_override and source_override in self.bucket_thresholds:
+            return self.bucket_thresholds[source_override], source_override
+
         parts = bucket_id.split("|")
         for end in range(len(parts), 0, -1):
             candidate = "|".join(parts[:end])
             if candidate in self.bucket_thresholds:
                 return self.bucket_thresholds[candidate], candidate
-        return (self.global_alpha, self.global_beta), None
+        return (self.global_alpha, self.global_beta), "ROOT"
 
     def _route_bucket_ids(self, bucket_parts: list[pd.Series]) -> pd.Series:
         if not bucket_parts:
@@ -395,6 +420,22 @@ class BTTWDModel:
         children_map: dict[str, list[str]] = {}
         split_plan: dict[str, dict] = {}
 
+        self.bucket_structure_records = []
+        root_record = {
+            "bucket_id": "ROOT",
+            "parent_id": "ROOT",
+            "level": 0,
+            "split_name": "ROOT",
+            "split_type": "ROOT",
+            "split_rule": "all",
+            "n_samples": int(n_samples),
+        }
+        self.bucket_structure_records.append(root_record)
+        log_bt(
+            "创建桶 bucket_id=ROOT，level=0，parent_id=ROOT，split_name=ROOT，split_type=ROOT，"
+            f"split_rule=\"all\"，n_samples={n_samples}"
+        )
+
         queue = deque()
         queue.append(("ROOT", 0, np.arange(n_samples)))
 
@@ -403,6 +444,10 @@ class BTTWDModel:
 
             if level >= num_levels or level >= self.max_levels:
                 leaf_index_map[bucket_id] = idx_all
+                if level >= self.max_levels:
+                    log_bt(
+                        f"桶 bucket_id={bucket_id} 已达到最大层数 max_levels={self.max_levels}，不再细分"
+                    )
                 continue
 
             part_series = bucket_parts[level]
@@ -418,9 +463,14 @@ class BTTWDModel:
 
             if len(large_values) == 0:
                 leaf_index_map[bucket_id] = idx_all
+                log_bt(
+                    f"桶 bucket_id={bucket_id} 样本不足（n={len(idx_all)} < min_bucket_size={self.min_bucket_size}），不再细分"
+                )
                 continue
 
             level_name = next(iter(groups.keys())).split("=")[0] if groups else f"L{level + 1}"
+            level_cfg = self.bucket_tree.levels_cfg[level] if level < len(self.bucket_tree.levels_cfg) else {}
+            split_type = level_cfg.get("type", "")
 
             # 构造“小桶”索引列表：不在 large_values 里的子桶统统归为 residual
             if groups:
@@ -441,6 +491,25 @@ class BTTWDModel:
                 bucket_index_map[child_id] = groups[cid]
                 child_ids.append(child_id)
 
+                split_rule = cid.split("=", 1)[1] if "=" in cid else cid
+                self.bucket_structure_records.append(
+                    {
+                        "bucket_id": child_id,
+                        "parent_id": bucket_id,
+                        "level": level + 1,
+                        "split_name": level_name,
+                        "split_type": split_type,
+                        "split_rule": split_rule,
+                        "n_samples": int(len(groups[cid])),
+                    }
+                )
+                log_bt(
+                    "创建桶 "
+                    f"bucket_id={child_id}，level={level + 1}，parent_id={bucket_id}，"
+                    f"split_name={level_name}，split_type={split_type or '-'}，split_rule=\"{split_rule}\"，"
+                    f"n_samples={len(groups[cid])}"
+                )
+
             others_part = None
             if has_residual:
                 others_part = f"{level_name}=others"
@@ -449,6 +518,24 @@ class BTTWDModel:
                 bucket_index_map[others_id] = residual
                 leaf_index_map[others_id] = residual
                 child_ids.append(others_id)
+
+                self.bucket_structure_records.append(
+                    {
+                        "bucket_id": others_id,
+                        "parent_id": bucket_id,
+                        "level": level + 1,
+                        "split_name": level_name,
+                        "split_type": split_type,
+                        "split_rule": "others",
+                        "n_samples": int(len(residual)),
+                    }
+                )
+                log_bt(
+                    "创建桶 "
+                    f"bucket_id={others_id}，level={level + 1}，parent_id={bucket_id}，"
+                    f"split_name={level_name}，split_type={split_type or '-'}，split_rule=\"others\"，"
+                    f"n_samples={len(residual)}"
+                )
 
             children_map[bucket_id] = child_ids
             split_plan[bucket_id] = {
@@ -466,6 +553,7 @@ class BTTWDModel:
                     queue.append((child_id, next_level, groups[cid]))
 
         self.split_plan = split_plan
+        self.children_map = children_map
         return leaf_index_map, visited_parent, bucket_index_map, children_map
 
     def _build_bucket_tree(self, bucket_parts: list[pd.Series], y: np.ndarray):
@@ -528,6 +616,14 @@ class BTTWDModel:
         # Step 3: 构建桶树（carve-out + others）
         leaf_index_map, visited_parent, bucket_index_map, children_map = self._build_bucket_tree(bucket_parts, y)
         bucket_ids = self._route_bucket_ids(bucket_parts)
+
+        if bucket_index_map:
+            total_buckets = len(bucket_index_map)
+            max_level = max(len(b.split("|")) for b in bucket_index_map.keys()) if bucket_index_map else 0
+            leaf_count = len(leaf_index_map)
+            log_bt(
+                f"桶树构建完成：总桶数={total_buckets}，最大层数={max_level}，叶子桶数={leaf_count}"
+            )
 
         self.bucket_info = {}
         bucket_data = {}
@@ -672,6 +768,8 @@ class BTTWDModel:
                 alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
                 bucket_score = compute_bucket_score({"regret": stats.get("regret", np.nan), "bac": stats.get("bac", np.nan)}, self.score_cfg)
                 self.bucket_thresholds[bucket_id] = (alpha, beta)
+            else:
+                stats = {"regret": float("nan"), "f1": float("nan"), "precision": float("nan"), "recall": float("nan"), "bnd_ratio": float("nan"), "pos_coverage": float("nan"), "bac": float("nan"), "auc": float("nan"), "n_samples": 0}
 
             parent_score = bucket_scores.get(parent_id) if parent_id in bucket_scores else global_score
             gain_like = None
@@ -684,11 +782,17 @@ class BTTWDModel:
             if weak_due_to_size or bucket_score is None or weak_due_to_gain:
                 status = "weak"
 
+            threshold_source_bucket = bucket_id if status == "strong" else (parent_id if parent_id is not None else "ROOT")
+            use_parent_threshold = status == "weak"
+
             self.bucket_info[bucket_id] = {
                 "n_samples": int(len(data.get("all", []))),
                 "parent_bucket_id": parent_id,
                 "status": status,
                 "gain_like": gain_like,
+                "bucket_score": bucket_score,
+                "parent_score": parent_score,
+                "effective_bucket_id": threshold_source_bucket,
             }
             if bucket_score is not None:
                 bucket_scores[bucket_id] = bucket_score
@@ -704,16 +808,45 @@ class BTTWDModel:
                     "BND_ratio_val": float(stats.get("bnd_ratio", np.nan)),
                     "pos_coverage_val": float(stats.get("pos_coverage", np.nan)),
                     "threshold_n_samples": int(stats.get("n_samples", 0)),
-                    "use_parent_threshold": status == "weak",
+                    "use_parent_threshold": use_parent_threshold,
+                    "BAC_val": float(stats.get("bac", np.nan)),
+                    "AUC_val": float(stats.get("auc", np.nan)),
+                    "score_metric": self.score_cfg.get("bucket_score_mode"),
+                    "score_value": float(bucket_score) if bucket_score is not None else float("nan"),
+                    "parent_score_value": float(parent_score) if parent_score is not None else float("nan"),
+                    "gain_value": float(gain_like) if gain_like is not None else float("nan"),
+                    "is_weak": status == "weak",
+                    "threshold_source_bucket": threshold_source_bucket,
                 }
             )
 
             if status == "strong" and alpha is not None and beta is not None:
+                self.bucket_thresholds[bucket_id] = (alpha, beta)
                 log_info(
                     f"【阈值】桶 {bucket_id}（n_val={len(val_idx)}）使用本地阈值 α={alpha:.4f}, β={beta:.4f}",
                 )
             elif status == "weak":
-                log_info(f"【阈值】桶 {bucket_id} 标记为弱桶，阈值回退父桶/全局")
+                log_info(
+                    f"【阈值】桶 {bucket_id} 标记为弱桶，阈值将回退使用 {threshold_source_bucket} 的阈值"
+                )
+
+            log_bt(
+                f"桶 bucket_id={bucket_id} level={data.get('level')}：\n"
+                f"    n_train={len(train_idx)}, n_val={len(val_idx)},\n"
+                f"    BAC={stats.get('bac', float('nan')):.3f}, F1={stats.get('f1', float('nan')):.3f}, "
+                f"AUC={stats.get('auc', float('nan')):.3f},\n"
+                f"    Regret={stats.get('regret', float('nan')):.3f}, BND_ratio={stats.get('bnd_ratio', float('nan')):.3f}, "
+                f"POS_coverage={stats.get('pos_coverage', float('nan')):.3f},\n"
+                f"    Score({self.score_cfg.get('bucket_score_mode')} )={bucket_score if bucket_score is not None else float('nan'):.3f}"
+            )
+
+            if parent_id is not None:
+                log_bt(
+                    f"桶 bucket_id={bucket_id}：\n"
+                    f"    parent_id={parent_id}，parent_Score={(parent_score if parent_score is not None else float('nan')):.3f}, "
+                    f"bucket_Score={(bucket_score if bucket_score is not None else float('nan')):.3f},\n"
+                    f"    Gain={(gain_like if gain_like is not None else float('nan')):+.3f}, is_weak={status == 'weak'}"
+                )
 
         if "ROOT" in self.bucket_info:
             self.bucket_info["ROOT"]["status"] = "strong"
@@ -728,27 +861,11 @@ class BTTWDModel:
             record["pos_rate_train"] = float(y[train_idx].mean()) if len(train_idx) else float("nan")
             record["pos_rate_val"] = float(y[val_idx].mean()) if len(val_idx) else float("nan")
 
-        # 对未单独训练阈值的桶补充阈值（继承父桶或全局阈值）
+        # 对未单独训练或标记为弱桶的桶补充阈值（继承父桶或全局阈值）
+        self.bucket_thresholds.setdefault("ROOT", (self.global_alpha, self.global_beta))
         for bucket_id, info in self.bucket_info.items():
-            if bucket_id in self.bucket_thresholds:
-                continue
-
             parent_id = info.get("parent_bucket_id")
-            ancestor = parent_id
-            inherited_from = None
-            while ancestor:
-                if ancestor in self.bucket_thresholds and self.bucket_info.get(ancestor, {}).get("status") == "strong":
-                    inherited_from = ancestor
-                    break
-                ancestor = self.bucket_info.get(ancestor, {}).get("parent_bucket_id")
-
-            if inherited_from is not None:
-                self.bucket_thresholds[bucket_id] = self.bucket_thresholds[inherited_from]
-                parent_with_threshold = inherited_from
-            else:
-                self.bucket_thresholds[bucket_id] = (self.global_alpha, self.global_beta)
-                parent_with_threshold = None
-
+            status = info.get("status")
             record = self.bucket_stats.get(bucket_id)
             if record is None:
                 record = self._init_bucket_record(
@@ -762,11 +879,54 @@ class BTTWDModel:
                 record["pos_rate_all"] = float("nan")
                 self.bucket_stats[bucket_id] = record
 
-            record["alpha"] = float(self.bucket_thresholds[bucket_id][0])
-            record["beta"] = float(self.bucket_thresholds[bucket_id][1])
+            source_bucket = record.get("threshold_source_bucket") or (
+                bucket_id if status != "weak" else (parent_id if parent_id is not None else "ROOT")
+            )
+
+            if status == "weak":
+                ancestor = parent_id
+                while ancestor:
+                    ancestor_info = self.bucket_info.get(ancestor, {})
+                    if ancestor in self.bucket_thresholds and ancestor_info.get("status") != "weak":
+                        source_bucket = ancestor
+                        break
+                    ancestor = ancestor_info.get("parent_bucket_id")
+                if source_bucket == bucket_id:
+                    source_bucket = parent_id if parent_id is not None else "ROOT"
+            elif status == "strong" and bucket_id in self.bucket_thresholds:
+                source_bucket = bucket_id
+
+            if source_bucket not in self.bucket_thresholds:
+                ancestor = info.get("parent_bucket_id")
+                while ancestor:
+                    ancestor_info = self.bucket_info.get(ancestor, {})
+                    if ancestor in self.bucket_thresholds and ancestor_info.get("status") != "weak":
+                        source_bucket = ancestor
+                        break
+                    ancestor = ancestor_info.get("parent_bucket_id")
+
+            if source_bucket not in self.bucket_thresholds:
+                source_bucket = "ROOT"
+
+            if source_bucket not in self.bucket_thresholds:
+                self.bucket_thresholds[source_bucket] = (self.global_alpha, self.global_beta)
+
+            effective_threshold = self.bucket_thresholds.get(source_bucket, (self.global_alpha, self.global_beta))
+            self.bucket_thresholds[bucket_id] = effective_threshold
+
+            record["alpha"] = float(effective_threshold[0])
+            record["beta"] = float(effective_threshold[1])
             record["threshold_n_samples"] = record.get("threshold_n_samples", 0)
-            record["use_parent_threshold"] = True
-            record["parent_with_threshold"] = parent_with_threshold if parent_with_threshold else ""
+            record["use_parent_threshold"] = source_bucket != bucket_id
+            record["parent_with_threshold"] = source_bucket if source_bucket not in {bucket_id, "ROOT"} else ""
+            record["threshold_source_bucket"] = source_bucket
+            info["effective_bucket_id"] = source_bucket or "ROOT"
+
+            if source_bucket != bucket_id:
+                log_bt(
+                    f"桶 bucket_id={bucket_id} 样本不足或为弱桶，未单独搜索阈值，继承桶 {source_bucket} 的阈值"
+                    f"(alpha={record['alpha']:.4f},beta={record['beta']:.4f})"
+                )
 
         # 汇总阈值日志
         self.threshold_logs = []
@@ -791,6 +951,12 @@ class BTTWDModel:
                     "threshold_n_samples": record.get("threshold_n_samples", 0),
                     "use_parent_threshold": record.get("use_parent_threshold", False),
                     "parent_with_threshold": record.get("parent_with_threshold", ""),
+                    "score_metric": record.get("score_metric"),
+                    "score_value": record.get("score_value"),
+                    "parent_score_value": record.get("parent_score_value"),
+                    "gain_value": record.get("gain_value"),
+                    "threshold_source_bucket": record.get("threshold_source_bucket", ""),
+                    "is_weak": record.get("is_weak", False),
                 }
             )
 
@@ -808,6 +974,8 @@ class BTTWDModel:
             "【BTTWD】共生成 "
             f"{bucket_ids.nunique()} 个叶子桶，其中有效桶 {len(self.bucket_models)} 个（已训练局部模型）"
         )
+
+        self._export_bucket_reports()
 
     def predict_proba(self, X: np.ndarray, X_df_for_bucket: pd.DataFrame) -> np.ndarray:
         bucket_parts = self.bucket_tree.assign_bucket_parts(X_df_for_bucket)
@@ -840,12 +1008,79 @@ class BTTWDModel:
         bucket_ids = self._route_bucket_ids(bucket_parts)
 
         preds = np.zeros(len(proba))
-        for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
-            (alpha, beta), _ = self._get_threshold_with_backoff(bucket_id)
+        self.fallback_stats = {}
 
-            bucket_proba = proba[list(idxs)]
+        def _ensure_fallback_record(bid: str):
+            if bid not in self.fallback_stats:
+                parent_id = self.bucket_info.get(bid, {}).get("parent_bucket_id")
+                self.fallback_stats[bid] = {
+                    "bucket_id": bid,
+                    "level": 0 if bid == "ROOT" else len(bid.split("|")),
+                    "assigned_samples": 0,
+                    "used_local_decision": 0,
+                    "fallback_to_parent": 0,
+                    "fallback_from_children": 0,
+                    "parent_id": parent_id if parent_id is not None else "ROOT",
+                    "is_weak": self.bucket_info.get(bid, {}).get("status") == "weak",
+                    "effective_bucket_id": self.bucket_info.get(bid, {}).get("effective_bucket_id", bid),
+                }
+            return self.fallback_stats[bid]
+
+        for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
+            idx_list = list(idxs)
+            (alpha, beta), source_bucket = self._get_threshold_with_backoff(bucket_id)
+            effective_bucket = source_bucket if source_bucket is not None else "ROOT"
+
+            bucket_proba = proba[idx_list]
             bucket_pred = np.where(bucket_proba >= alpha, 1, np.where(bucket_proba <= beta, 0, -1))
-            preds[list(idxs)] = bucket_pred
+            preds[idx_list] = bucket_pred
+
+            record = _ensure_fallback_record(bucket_id)
+            record["assigned_samples"] += len(idx_list)
+
+            target_record = _ensure_fallback_record(effective_bucket)
+            use_local = effective_bucket == bucket_id and not record.get("is_weak", False)
+            if use_local:
+                record["used_local_decision"] += len(idx_list)
+            else:
+                record["fallback_to_parent"] += len(idx_list)
+                target_record["fallback_from_children"] += len(idx_list)
+                target_record["used_local_decision"] += len(idx_list)
+                record["effective_bucket_id"] = effective_bucket
+
+        for bid, rec in self.fallback_stats.items():
+            log_bt(
+                f"预测统计：bucket_id={bid}：\n"
+                f"    assigned_samples={rec.get('assigned_samples', 0)},\n"
+                f"    used_local_decision={rec.get('used_local_decision', 0)},\n"
+                f"    fallback_to_parent={rec.get('fallback_to_parent', 0)},\n"
+                f"    parent_id={rec.get('parent_id')},\n"
+                f"    is_weak={rec.get('is_weak')}"
+            )
+
+        total_samples = len(proba)
+        leaf_decisions = sum(
+            rec.get("used_local_decision", 0)
+            for bid, rec in self.fallback_stats.items()
+            if not self.children_map.get(bid, [])
+        )
+        middle_decisions = sum(
+            rec.get("used_local_decision", 0)
+            for bid, rec in self.fallback_stats.items()
+            if self.children_map.get(bid, []) and bid != "ROOT"
+        )
+        global_decisions = self.fallback_stats.get("ROOT", {}).get("used_local_decision", 0)
+
+        if total_samples > 0:
+            log_bt(
+                "回退汇总：\n"
+                f"    总样本数={total_samples},\n"
+                f"    使用叶子桶决策的样本比例={leaf_decisions / total_samples:.3%},\n"
+                f"    使用中间桶决策的样本比例={middle_decisions / total_samples:.3%},\n"
+                f"    回退到全局桶决策的样本比例={global_decisions / total_samples:.3%}"
+            )
+
+        self._export_fallback_stats()
         return preds
 
     def get_bucket_stats(self) -> pd.DataFrame:
@@ -861,3 +1096,127 @@ class BTTWDModel:
         if not self.threshold_logs:
             return pd.DataFrame()
         return pd.DataFrame(self.threshold_logs)
+
+    def _export_bucket_reports(self) -> None:
+        if not self.bucket_stats:
+            return
+
+        structure_rows = []
+        seen = set()
+        for rec in self.bucket_structure_records:
+            bid = rec.get("bucket_id")
+            seen.add(bid)
+            stat = self.bucket_stats.get(bid, {})
+            info = self.bucket_info.get(bid, {})
+            children = self.children_map.get(bid, [])
+            structure_rows.append(
+                {
+                    "bucket_id": bid,
+                    "parent_id": rec.get("parent_id", "ROOT"),
+                    "level": rec.get("level", 0),
+                    "split_name": rec.get("split_name", ""),
+                    "split_type": rec.get("split_type", ""),
+                    "split_rule": rec.get("split_rule", ""),
+                    "n_samples_total": int(stat.get("n_all", rec.get("n_samples", 0) or 0)),
+                    "n_train": int(stat.get("n_train", 0)),
+                    "n_val": int(stat.get("n_val", 0)),
+                    "n_test": stat.get("n_test", np.nan),
+                    "is_leaf": len(children) == 0,
+                    "is_weak": info.get("status") == "weak",
+                    "effective_bucket_id": info.get("effective_bucket_id", bid),
+                }
+            )
+
+        for bid, stat in self.bucket_stats.items():
+            if bid in seen:
+                continue
+            info = self.bucket_info.get(bid, {})
+            children = self.children_map.get(bid, [])
+            structure_rows.append(
+                {
+                    "bucket_id": bid,
+                    "parent_id": stat.get("parent_bucket_id", ""),
+                    "level": 0 if bid == "ROOT" else len(str(bid).split("|")),
+                    "split_name": "",
+                    "split_type": "",
+                    "split_rule": "",
+                    "n_samples_total": int(stat.get("n_all", 0)),
+                    "n_train": int(stat.get("n_train", 0)),
+                    "n_val": int(stat.get("n_val", 0)),
+                    "n_test": stat.get("n_test", np.nan),
+                    "is_leaf": len(children) == 0,
+                    "is_weak": info.get("status") == "weak",
+                    "effective_bucket_id": info.get("effective_bucket_id", bid),
+                }
+            )
+
+        structure_df = pd.DataFrame(structure_rows)
+        structure_df.to_csv(self.results_dir / "bucket_tree_structure.csv", index=False)
+
+        metrics_rows = []
+        for bid, stat in self.bucket_stats.items():
+            metrics_rows.append(
+                {
+                    "bucket_id": bid,
+                    "parent_id": stat.get("parent_bucket_id", ""),
+                    "level": 0 if bid == "ROOT" else len(str(bid).split("|")),
+                    "n_train": stat.get("n_train", 0),
+                    "n_val": stat.get("n_val", 0),
+                    "BAC": stat.get("BAC_val"),
+                    "F1": stat.get("F1_val"),
+                    "AUC": stat.get("AUC_val"),
+                    "Regret": stat.get("regret_val"),
+                    "BND_ratio": stat.get("BND_ratio_val"),
+                    "POS_coverage": stat.get("pos_coverage_val"),
+                    "score_metric": stat.get("score_metric"),
+                    "score_value": stat.get("score_value"),
+                    "parent_score_value": stat.get("parent_score_value"),
+                    "gain_value": stat.get("gain_value"),
+                    "is_weak": stat.get("is_weak", False),
+                    "threshold_source_bucket": stat.get("threshold_source_bucket")
+                    or stat.get("parent_with_threshold")
+                    or bid,
+                }
+            )
+
+        pd.DataFrame(metrics_rows).to_csv(self.results_dir / "bucket_metrics_gain.csv", index=False)
+
+        threshold_rows = []
+        for bid, thresh in self.bucket_thresholds.items():
+            stat = self.bucket_stats.get(bid, {})
+            threshold_rows.append(
+                {
+                    "bucket_id": bid,
+                    "alpha": float(thresh[0]),
+                    "beta": float(thresh[1]),
+                    "threshold_mode": self.threshold_mode,
+                    "threshold_source_bucket": stat.get("threshold_source_bucket")
+                    or stat.get("parent_with_threshold")
+                    or bid,
+                    "is_weak": stat.get("is_weak", False),
+                }
+            )
+
+        pd.DataFrame(threshold_rows).to_csv(self.results_dir / "bucket_thresholds.csv", index=False)
+
+    def _export_fallback_stats(self) -> None:
+        if not self.fallback_stats:
+            return
+
+        rows = []
+        for bid, rec in self.fallback_stats.items():
+            rows.append(
+                {
+                    "bucket_id": bid,
+                    "level": rec.get("level", 0),
+                    "assigned_samples": rec.get("assigned_samples", 0),
+                    "used_local_decision": rec.get("used_local_decision", 0),
+                    "fallback_to_parent": rec.get("fallback_to_parent", 0),
+                    "parent_id": rec.get("parent_id", "ROOT"),
+                    "is_weak": rec.get("is_weak", False),
+                    "effective_bucket_id": rec.get("effective_bucket_id", bid),
+                    "fallback_from_children": rec.get("fallback_from_children", 0),
+                }
+            )
+
+        pd.DataFrame(rows).to_csv(self.results_dir / "bucket_fallback_stats.csv", index=False)
