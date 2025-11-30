@@ -49,9 +49,14 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
         continuous_cols, categorical_cols = _infer_columns(df, target_col_for_model)
     log_info(f"【预处理】连续特征={len(continuous_cols)}个，类别特征={len(categorical_cols)}个")
 
-    y = (df[target_col_for_model] == positive_label).astype(int).values
-    if negative_label is not None:
-        y = np.where(df[target_col_for_model] == positive_label, 1, 0)
+    target_series = df[target_col_for_model]
+    # 若目标列已经是 0/1 数值标签，直接复用，避免二次转换导致全为 0
+    if set(pd.unique(target_series.dropna())) <= {0, 1}:
+        y = target_series.astype(int).values
+    else:
+        y = (target_series == positive_label).astype(int).values
+        if negative_label is not None:
+            y = np.where(target_series == positive_label, 1, 0)
     drop_cols = set(prep_cfg.get("drop_cols", []))
     drop_cols.add(target_col_for_model)
     source_target_col = data_cfg.get("target_col")
