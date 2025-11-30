@@ -416,7 +416,18 @@ class BTTWDModel:
                 continue
 
             level_name = next(iter(groups.keys())).split("=")[0] if groups else f"L{level + 1}"
-            residual = np.concatenate([groups[cid] for cid in groups if cid not in large_values]) if groups else np.array([], dtype=int)
+
+            # 构造“小桶”索引列表：不在 large_values 里的子桶统统归为 residual
+            if groups:
+                residual_list = [groups[cid] for cid in groups if cid not in large_values]
+                if residual_list:
+                    residual = np.concatenate(residual_list)
+                else:
+                    # 所有子桶都满足 min_bucket_size / min_pos_per_bucket，当前层没有“小桶”
+                    # 这种情况下 residual 设为空数组即可，others 桶中样本数为 0
+                    residual = np.array([], dtype=int)
+            else:
+                residual = np.array([], dtype=int)
 
             child_ids = []
             for cid in large_values:
