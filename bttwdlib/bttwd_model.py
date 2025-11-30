@@ -423,8 +423,6 @@ class BTTWDModel:
                 if residual_list:
                     residual = np.concatenate(residual_list)
                 else:
-                    # 所有子桶都满足 min_bucket_size / min_pos_per_bucket，当前层没有“小桶”
-                    # 这种情况下 residual 设为空数组即可，others 桶中样本数为 0
                     residual = np.array([], dtype=int)
             else:
                 residual = np.array([], dtype=int)
@@ -436,12 +434,15 @@ class BTTWDModel:
                 bucket_index_map[child_id] = groups[cid]
                 child_ids.append(child_id)
 
-            others_part = f"{level_name}=others"
-            others_id = self._join_bucket_id(bucket_id, others_part)
-            visited_parent[others_id] = bucket_id
-            bucket_index_map[others_id] = residual
-            leaf_index_map[others_id] = residual
-            child_ids.append(others_id)
+            if residual.size > 0:
+                others_part = f"{level_name}=others"
+                others_id = self._join_bucket_id(bucket_id, others_part)
+                visited_parent[others_id] = bucket_id
+                bucket_index_map[others_id] = residual
+                leaf_index_map[others_id] = residual
+                child_ids.append(others_id)
+            else:
+                others_part = None
 
             children_map[bucket_id] = child_ids
             split_plan[bucket_id] = {
