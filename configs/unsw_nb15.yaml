@@ -2,8 +2,8 @@
 
 DATA:
   dataset_name: "UNSW_NB15"                                       # 数据集名称
-  train_csv: "../data/unsw/UNSW_NB15_training-set.csv"            # 训练集文件路径（相对仓库根目录）
-  test_csv: "../data/unsw/UNSW_NB15_testing-set.csv"              # 测试集文件路径（相对仓库根目录）
+  train_csv: "../data/UNSW-NB15/UNSW_NB15_training-set.csv"            # 训练集文件路径（相对仓库根目录）
+  test_csv: "../data/UNSW-NB15/UNSW_NB15_testing-set.csv"              # 测试集文件路径（相对仓库根目录）
   file_type: "csv"                                               # 数据文件类型
   sep: ","                                                         # CSV 分隔符
   header: 0                                                         # CSV 表头行号
@@ -60,8 +60,8 @@ BTTWD:
   min_pos_per_bucket: 5                                           # 分桶停止条件之二：正样本数 < 5 不再细分
   max_levels: 2                                                     # 只允许两层区域划分，第三层之后强制停止（与增益无关）
   use_gain: true                                                    # 增益只用于弱桶判定：gain < 阈值 视为弱桶，阈值/决策优先回退
-  min_gain_for_split: 0.005                                         # 增益只用于弱桶判定：gain < 0.005 的桶视为弱桶，阈值/决策优先回退到父桶/ROOT
-  gamma_bucket: 0.05                                                # 子桶个数的复杂度惩罚（类似 XGBoost gamma）
+  min_gain_for_split: -0.01                                       # 增益只用于弱桶判定：gain < 0.005 的桶视为弱桶，阈值/决策优先回退到父桶/ROOT
+  gamma_bucket: 0.00                                                # 子桶个数的复杂度惩罚（类似 XGBoost gamma）
   bucket_subsample: 0.7                                             # 桶内样本随机采样比例
   max_train_samples_per_bucket: 30000                               # 每个桶最多用于训练的样本数
   parent_share_rate: 0.0                                            # 当前代码未用，预留占位
