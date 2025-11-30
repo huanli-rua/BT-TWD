@@ -56,8 +56,8 @@ BTTWD:
       name: "L2_service"
       type: "categorical_group"                                   # 按服务分桶
       col: "service"
-  min_bucket_size: 5000                                             # 叶子桶最小样本数，小于则回退
-  min_pos_per_bucket: 50                                            # 叶子桶最少正样本数
+  min_bucket_size: 50                                            # 叶子桶最小样本数，小于则回退
+  min_pos_per_bucket: 5                                           # 叶子桶最少正样本数
   max_levels: 2                                                     # 桶树最大层数
   use_gain: true                                                    # 是否启用桶增益判定
   min_gain_for_split: 0.005                                         # 桶级增益阈值，小于该值不再细分
