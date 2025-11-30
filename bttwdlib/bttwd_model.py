@@ -307,12 +307,17 @@ class BTTWDModel:
                 if level >= len(bucket_parts):
                     break
                 part_value = bucket_parts[level].iat[i]
-                child_part = part_value if part_value in plan.get("allowed_children", set()) else plan.get("others_part")
-                if child_part is None:
+                allowed = plan.get("allowed_children", set())
+                others_part = plan.get("others_part")
+                if part_value in allowed:
+                    child_part = part_value
+                elif others_part is not None:
+                    child_part = others_part
+                else:
                     break
                 next_id = self._join_bucket_id(current, child_part)
                 bucket_ids.iat[i] = next_id
-                if child_part == plan.get("others_part"):
+                if child_part == others_part:
                     break
                 current = next_id
         return bucket_ids
@@ -427,6 +432,8 @@ class BTTWDModel:
             else:
                 residual = np.array([], dtype=int)
 
+            has_residual = residual.size > 0
+
             child_ids = []
             for cid in large_values:
                 child_id = self._join_bucket_id(bucket_id, cid)
@@ -434,15 +441,14 @@ class BTTWDModel:
                 bucket_index_map[child_id] = groups[cid]
                 child_ids.append(child_id)
 
-            if residual.size > 0:
+            others_part = None
+            if has_residual:
                 others_part = f"{level_name}=others"
                 others_id = self._join_bucket_id(bucket_id, others_part)
                 visited_parent[others_id] = bucket_id
                 bucket_index_map[others_id] = residual
                 leaf_index_map[others_id] = residual
                 child_ids.append(others_id)
-            else:
-                others_part = None
 
             children_map[bucket_id] = child_ids
             split_plan[bucket_id] = {
@@ -606,6 +612,32 @@ class BTTWDModel:
         for bucket_id in ordered_buckets:
             data = bucket_data[bucket_id]
             parent_id = data.get("parent")
+
+            all_idx = data.get("all", np.array([], dtype=int))
+            if all_idx.size == 0:
+                self.bucket_info[bucket_id] = {
+                    "n_samples": 0,
+                    "parent_bucket_id": parent_id,
+                    "status": "weak",
+                    "gain_like": None,
+                }
+
+                record = self.bucket_stats.get(bucket_id)
+                if record is None:
+                    record = self._init_bucket_record(
+                        bucket_id,
+                        parent_id,
+                        np.array([], dtype=int),
+                        np.array([], dtype=int),
+                        y,
+                    )
+                    record["n_all"] = 0
+                    record["pos_rate_all"] = float("nan")
+                    self.bucket_stats[bucket_id] = record
+
+                record["use_parent_threshold"] = True
+                continue
+
             train_idx, val_idx = _get_bucket_dataset(bucket_id)
             y_train_bucket = y[train_idx]
             y_val_bucket = y[val_idx]
@@ -613,6 +645,8 @@ class BTTWDModel:
             record = self.bucket_stats.get(bucket_id)
             record["n_train"] = int(len(train_idx))
             record["n_val"] = int(len(val_idx))
+            record["pos_rate_train"] = float(y[train_idx].mean()) if len(train_idx) else float("nan")
+            record["pos_rate_val"] = float(y[val_idx].mean()) if len(val_idx) else float("nan")
 
             is_others = data.get("is_others", False)
             model = None
@@ -758,6 +792,16 @@ class BTTWDModel:
                     "use_parent_threshold": record.get("use_parent_threshold", False),
                     "parent_with_threshold": record.get("parent_with_threshold", ""),
                 }
+            )
+
+        stats_df = self.get_bucket_stats()
+        if not stats_df.empty:
+            n_total = len(stats_df)
+            n_non_empty = int((stats_df["n_all"] > 0).sum())
+            n_strong = sum(info.get("status") == "strong" for info in self.bucket_info.values())
+            n_weak = sum(info.get("status") == "weak" for info in self.bucket_info.values())
+            log_info(
+                f"【BTTWD】桶统计摘要：总桶数={n_total}，非空桶={n_non_empty}，强桶={n_strong}，弱桶={n_weak}"
             )
 
         log_info(
