@@ -56,27 +56,29 @@ BTTWD:
 
 
 
-    # ======= 候选层 2：起飞机场 =======
-    - level: 1
-      name: "L2_origin"
-      type: "categorical_group"                               # 按起飞机场分组
-      col: "Origin"
-      min_count: 3000
-      other_label: "OTHER"
     # ======= 候选层 1：航司（建议常开）=======
-    - level: 2
+    - level: 1
       name: "L1_carrier"
-      type: "categorical_group"                                 # 按航司分组
+      type: "categorical_group"               # 按航司分组：大航司单独建桶，小航司合并为 OTHER_CARRIER
       col: "UniqueCarrier"
-      min_count: 4000                                            # 大航司独立，小航司合并为 OTHER
-      other_label: "OTHER"
-    # ======= 候选层 3：目的机场 =======
+      min_count: 4000                         # 样本数 >= 4000 的航司单独成桶，其余归为 OTHER_CARRIER
+      other_label: "OTHER_CARRIER"
+
+    # ======= 候选层 2：起飞机场 =======
+    - level: 2
+      name: "L2_origin"
+      type: "categorical_group"               # 按起飞机场分组：大机场单独建桶，小机场合并为 OTHER_ORIGIN
+      col: "Origin"
+      min_count: 3000                         # 样本数 >= 3000 的机场单独成桶，其余归为 OTHER_ORIGIN
+      other_label: "OTHER_ORIGIN"
+
+    # ======= 候选层 3：目的机场（可选，一般关闭）=======
     # - level: 3
     #   name: "L3_dest"
-    #   type: "categorical_group"                               # 按目的机场分组
+    #   type: "categorical_group"             # 按目的机场分组：大机场单独建桶，小机场合并为 OTHER_DEST
     #   col: "Dest"
-    #   min_count: 30000
-    #   other_label: "OTHER"
+    #   min_count: 3000                       # 可以和 Origin 保持同一量级
+    #   other_label: "OTHER_DEST"
 
 
 
