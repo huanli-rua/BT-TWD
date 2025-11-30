@@ -34,6 +34,7 @@ class BTTWDModel:
         self.min_pos_per_bucket = bcfg.get("min_pos_per_bucket", 0)
         self.max_levels = bcfg.get("max_levels", bcfg.get("max_depth", 10))
         self.min_gain_for_split = bcfg.get("min_gain_for_split", 0.0)
+        self.small_bucket_threshold = bcfg.get("small_bucket_threshold", self.min_bucket_size)
         self.use_gain = bcfg.get("use_gain", True)
         self.gamma_bucket = bcfg.get("gamma_bucket", 0.0)
         self.parent_share_rate = bcfg.get("parent_share_rate", 0.0)
@@ -74,6 +75,7 @@ class BTTWDModel:
         self.threshold_logs = []
         self.global_model = None
         self.global_pos_rate = 0.5
+        self.split_plan = {}
         self.rng = np.random.default_rng(self.random_state)
         self.bucket_estimator = self._build_bucket_estimator()
         self.score_cfg = self._build_score_cfg(cfg)
@@ -289,6 +291,32 @@ class BTTWDModel:
                 return self.bucket_thresholds[candidate], candidate
         return (self.global_alpha, self.global_beta), None
 
+    def _route_bucket_ids(self, bucket_parts: list[pd.Series]) -> pd.Series:
+        if not bucket_parts:
+            return pd.Series(dtype="string")
+
+        n = len(bucket_parts[0])
+        bucket_ids = pd.Series(["ROOT"] * n, dtype="string")
+        for i in range(n):
+            current = "ROOT"
+            while True:
+                plan = self.split_plan.get(current)
+                if plan is None:
+                    break
+                level = plan.get("level", 0)
+                if level >= len(bucket_parts):
+                    break
+                part_value = bucket_parts[level].iat[i]
+                child_part = part_value if part_value in plan.get("allowed_children", set()) else plan.get("others_part")
+                if child_part is None:
+                    break
+                next_id = self._join_bucket_id(current, child_part)
+                bucket_ids.iat[i] = next_id
+                if child_part == plan.get("others_part"):
+                    break
+                current = next_id
+        return bucket_ids
+
     def _init_bucket_record(self, bucket_id, parent_id, train_idx, val_idx, y):
         return {
             "bucket_id": bucket_id,
@@ -341,165 +369,89 @@ class BTTWDModel:
 
         return {"regret": float(regret_val), "bac": float(bac) if not np.isnan(bac) else np.nan}
 
-    def _build_bucket_tree_with_gain(self, bucket_ids, proba_all: np.ndarray, y: np.ndarray):
-        """基于 Gain 的桶树构建逻辑。"""
+    def _join_bucket_id(self, parent_id: str | None, child_part: str) -> str:
+        if parent_id in {None, "", "ROOT"}:
+            return child_part
+        return f"{parent_id}|{child_part}"
 
-        bucket_ids = pd.Series(bucket_ids, dtype="string")
-        parts_series = bucket_ids.str.split("|")
-        if len(parts_series) == 0:
-            return {}, {}
+    def _build_bucket_tree_carve(
+        self, bucket_parts: list[pd.Series], y: np.ndarray
+    ) -> tuple[dict, dict, dict, dict]:
+        """按最小样本数 + 正类数进行部分 carve-out 分桶，生成 others 结构。"""
 
-        lengths = parts_series.apply(len)
-        if lengths.nunique() != 1:
-            raise ValueError("bucket_id 的层级深度不一致，当前实现假设所有路径长度相同")
+        if not bucket_parts:
+            return {}, {}, {}, {}
 
-        num_levels = len(parts_series.iloc[0])
-        level_prefixes = []
-        for level in range(num_levels):
-            level_prefixes.append(parts_series.apply(lambda p: "|".join(p[: level + 1])))
+        num_levels = len(bucket_parts)
+        n_samples = len(bucket_parts[0])
+        leaf_index_map: dict[str, np.ndarray] = {}
+        visited_parent: dict[str, str | None] = {"ROOT": None}
+        bucket_index_map: dict[str, np.ndarray] = {"ROOT": np.arange(n_samples)}
+        children_map: dict[str, list[str]] = {}
+        split_plan: dict[str, dict] = {}
 
-        level_groups = []
-        for lvl_series in level_prefixes:
-            level_groups.append({bid: idxs.to_numpy() for bid, idxs in lvl_series.groupby(lvl_series).groups.items()})
-
-        leaf_index_map = {}
-        visited_parent = {}
-        bucket_index_map = {}
-        queue = deque((bucket_id, 0) for bucket_id in level_groups[0].keys())
+        queue = deque()
+        queue.append(("ROOT", 0, np.arange(n_samples)))
 
         while queue:
-            bucket_id, level = queue.popleft()
-            idx_all = level_groups[level][bucket_id]
-            parent_id = get_parent_bucket_id(bucket_id)
-            visited_parent[bucket_id] = parent_id
+            bucket_id, level, idx_all = queue.popleft()
 
-            bucket_index_map[bucket_id] = idx_all
-
-            if len(idx_all) < self.min_bucket_size:
-                log_bt(
-                    f"[BT] 父桶 {bucket_id} 样本不足（n={len(idx_all)} < min_bucket_size={self.min_bucket_size}），不再细分"
-                )
+            if level >= num_levels or level >= self.max_levels:
                 leaf_index_map[bucket_id] = idx_all
                 continue
 
-            if level + 1 >= self.max_levels or level == num_levels - 1:
-                leaf_index_map[bucket_id] = idx_all
-                continue
-
-            child_level = level + 1
-            child_series = level_prefixes[child_level]
-            child_values = child_series.iloc[idx_all]
-            child_groups = {cid: idxs.to_numpy() for cid, idxs in child_values.groupby(child_values).groups.items()}
-
-            if self.min_pos_per_bucket > 0:
-                child_pos_counts = {cid: int(np.sum(y[cidx])) for cid, cidx in child_groups.items()}
-                low_pos_children = {cid: cnt for cid, cnt in child_pos_counts.items() if cnt < self.min_pos_per_bucket}
-                if low_pos_children:
-                    log_bt(
-                        f"[BT] 子桶正类数不足（{low_pos_children}，阈值={self.min_pos_per_bucket}），放弃当前分裂"
-                    )
-                    leaf_index_map[bucket_id] = idx_all
+            part_series = bucket_parts[level]
+            values = part_series.iloc[idx_all]
+            groups = {cid: idxs.to_numpy() for cid, idxs in values.groupby(values).groups.items()}
+            large_values = []
+            for cid, cidx in groups.items():
+                if len(cidx) < self.min_bucket_size:
                     continue
-
-            parent_metrics = self._calc_bucket_metrics(proba_all[idx_all], y[idx_all])
-            parent_score = compute_bucket_score(parent_metrics, self.score_cfg)
-            child_scores = []
-            child_weights = []
-            for cid, cidx in child_groups.items():
-                metrics = self._calc_bucket_metrics(proba_all[cidx], y[cidx])
-                child_scores.append(compute_bucket_score(metrics, self.score_cfg))
-                child_weights.append(len(cidx) / len(idx_all))
-
-            gain = compute_bucket_gain(parent_score, child_scores, child_weights, self.gamma_bucket)
-            log_bt(
-                f"桶 {bucket_id} 分裂前 Score={parent_score:.4f}，层级 L{level + 1}，样本 n={len(idx_all)}；子桶Score={child_scores}，Gain={gain:.4f}"
-            )
-
-            if gain < self.min_gain_for_split:
-                log_bt(
-                    f"Gain 不足（Gain={gain:.4f} < 阈值={self.min_gain_for_split:.4f}），停止在本层"
-                )
-                leaf_index_map[bucket_id] = idx_all
-                continue
-
-            log_bt(
-                f"[BT] 本次分裂由 gain 控制，子桶样本不足将在阈值阶段通过回退机制处理"
-            )
-            log_bt(f"Gain 足够，进入下一层 L{child_level + 1}")
-            queue.extend((cid, child_level) for cid in child_groups.keys())
-
-        return leaf_index_map, visited_parent, bucket_index_map
-
-    def _build_bucket_tree_simple(self, bucket_ids, y: np.ndarray) -> tuple[dict, dict, dict]:
-        """不计算 Gain 的固定分层桶树逻辑。"""
-
-        log_bt("Gain 开关关闭(use_gain=False)，跳过增益判定，按固定规则细分桶树")
-
-        bucket_ids = pd.Series(bucket_ids, dtype="string")
-        parts_series = bucket_ids.str.split("|")
-        if len(parts_series) == 0:
-            return {}, {}
-
-        lengths = parts_series.apply(len)
-        if lengths.nunique() != 1:
-            raise ValueError("bucket_id 的层级深度不一致，当前实现假设所有路径长度相同")
-
-        num_levels = len(parts_series.iloc[0])
-        level_prefixes = []
-        for level in range(num_levels):
-            level_prefixes.append(parts_series.apply(lambda p: "|".join(p[: level + 1])))
-
-        level_groups = []
-        for lvl_series in level_prefixes:
-            level_groups.append({bid: idxs.to_numpy() for bid, idxs in lvl_series.groupby(lvl_series).groups.items()})
-
-        leaf_index_map = {}
-        visited_parent = {}
-        bucket_index_map = {}
-        queue = deque((bucket_id, 0) for bucket_id in level_groups[0].keys())
-
-        while queue:
-            bucket_id, level = queue.popleft()
-            idx_all = level_groups[level][bucket_id]
-            parent_id = get_parent_bucket_id(bucket_id)
-            visited_parent[bucket_id] = parent_id
-
-            bucket_index_map[bucket_id] = idx_all
-
-            if len(idx_all) < self.min_bucket_size:
-                log_bt(
-                    f"[BT] 父桶 {bucket_id} 样本不足（n={len(idx_all)} < min_bucket_size={self.min_bucket_size}），不再细分"
-                )
-                leaf_index_map[bucket_id] = idx_all
-                continue
-
-            if level + 1 >= self.max_levels or level == num_levels - 1:
-                leaf_index_map[bucket_id] = idx_all
-                continue
-
-            child_level = level + 1
-            child_series = level_prefixes[child_level]
-            child_values = child_series.iloc[idx_all]
-            child_groups = {cid: idxs.to_numpy() for cid, idxs in child_values.groupby(child_values).groups.items()}
-
-            if self.min_pos_per_bucket > 0:
-                child_pos_counts = {cid: int(np.sum(y[cidx])) for cid, cidx in child_groups.items()}
-                low_pos_children = {cid: cnt for cid, cnt in child_pos_counts.items() if cnt < self.min_pos_per_bucket}
-                if low_pos_children:
-                    log_bt(
-                        f"[BT] 子桶正类数不足（{low_pos_children}，阈值={self.min_pos_per_bucket}），放弃当前分裂"
-                    )
-                    leaf_index_map[bucket_id] = idx_all
+                if self.min_pos_per_bucket > 0 and np.sum(y[cidx]) < self.min_pos_per_bucket:
                     continue
+                large_values.append(cid)
 
-            queue.extend((cid, child_level) for cid in child_groups.keys())
+            if len(large_values) == 0:
+                leaf_index_map[bucket_id] = idx_all
+                continue
 
-        return leaf_index_map, visited_parent, bucket_index_map
+            level_name = next(iter(groups.keys())).split("=")[0] if groups else f"L{level + 1}"
+            residual = np.concatenate([groups[cid] for cid in groups if cid not in large_values]) if groups else np.array([], dtype=int)
 
-    def _build_bucket_tree(self, bucket_ids, proba_all: np.ndarray, y: np.ndarray):
-        if self.use_gain:
-            return self._build_bucket_tree_with_gain(bucket_ids, proba_all, y)
-        return self._build_bucket_tree_simple(bucket_ids, y)
+            child_ids = []
+            for cid in large_values:
+                child_id = self._join_bucket_id(bucket_id, cid)
+                visited_parent[child_id] = bucket_id
+                bucket_index_map[child_id] = groups[cid]
+                child_ids.append(child_id)
+
+            others_part = f"{level_name}=others"
+            others_id = self._join_bucket_id(bucket_id, others_part)
+            visited_parent[others_id] = bucket_id
+            bucket_index_map[others_id] = residual
+            leaf_index_map[others_id] = residual
+            child_ids.append(others_id)
+
+            children_map[bucket_id] = child_ids
+            split_plan[bucket_id] = {
+                "level": level,
+                "allowed_children": set(large_values),
+                "others_part": others_part,
+            }
+
+            next_level = level + 1
+            for cid in large_values:
+                child_id = self._join_bucket_id(bucket_id, cid)
+                if next_level >= self.max_levels:
+                    leaf_index_map[child_id] = groups[cid]
+                else:
+                    queue.append((child_id, next_level, groups[cid]))
+
+        self.split_plan = split_plan
+        return leaf_index_map, visited_parent, bucket_index_map, children_map
+
+    def _build_bucket_tree(self, bucket_parts: list[pd.Series], y: np.ndarray):
+        return self._build_bucket_tree_carve(bucket_parts, y)
 
     def fit(self, X: np.ndarray, y: np.ndarray, X_df_for_bucket: pd.DataFrame):
         log_info(
@@ -524,8 +476,8 @@ class BTTWDModel:
 
         self.global_pos_rate = float(np.mean(y))
 
-        # Step 1: 预生成桶ID
-        bucket_ids = self.bucket_tree.assign_buckets(X_df_for_bucket)
+        # Step 1: 预生成桶ID（逐层标签）
+        bucket_parts = self.bucket_tree.assign_bucket_parts(X_df_for_bucket)
 
         self.bucket_stats = {}
         self.threshold_logs = []
@@ -552,237 +504,183 @@ class BTTWDModel:
 
         if self.global_model is None:
             proba_all = np.full(len(y), self.global_pos_rate)
-            log_bt(
-                "global_estimator=none：桶增益计算将使用全局正类率，通常不会产生正的 Gain，BT 结构将基本不细分。"
-            )
         else:
             proba_all = self.global_model.predict_proba(X)[:, 1]
 
-        # Step 3: 桶增益判定，决定是否继续细分
-        leaf_index_map, visited_parent, bucket_index_map = self._build_bucket_tree(
-            bucket_ids, proba_all, y
-        )
-
-        parent_index_map = defaultdict(list)
+        # Step 3: 构建桶树（carve-out + others）
+        leaf_index_map, visited_parent, bucket_index_map, children_map = self._build_bucket_tree(bucket_parts, y)
+        bucket_ids = self._route_bucket_ids(bucket_parts)
 
         self.bucket_info = {}
+        bucket_data = {}
         for bucket_id, idx_all in bucket_index_map.items():
-            y_bucket_all = y[idx_all]
-            n_bucket = len(idx_all)
             parent_id = visited_parent.get(bucket_id)
-            is_strong = n_bucket >= self.min_samples_for_thresholds and np.unique(y_bucket_all).size >= 2
-            self.bucket_info[bucket_id] = {
-                "n_samples": int(n_bucket),
-                "is_strong": bool(is_strong),
-                "parent_bucket_id": parent_id,
-            }
-            if is_strong:
-                log_info(
-                    f"【BTTWD】桶 {bucket_id}，n={n_bucket}，标记为【强桶】，将执行本地阈值搜索"
-                )
-            else:
-                reason = "单类" if np.unique(y_bucket_all).size < 2 else f"n={n_bucket} < min_samples_for_thresholds={self.min_samples_for_thresholds}"
-                log_info(
-                    f"【BTTWD】桶 {bucket_id}，n={n_bucket}，标记为【弱桶】，后续回退父桶/全局阈值（原因：{reason}）"
-                )
-
-        for bucket_id, idx_all in leaf_index_map.items():
-            y_bucket = y[idx_all]
-            n_bucket = len(idx_all)
-            parent_id = visited_parent.get(bucket_id)
-
             train_mask = np.isin(idx_all, inner_train_idx)
             val_mask = np.isin(idx_all, inner_val_idx)
             train_idx_bucket = idx_all[train_mask]
             val_idx_bucket = idx_all[val_mask]
 
-            self.bucket_stats[bucket_id] = {
-                **self._init_bucket_record(bucket_id, parent_id, train_idx_bucket, val_idx_bucket, y),
-                "n_all": int(n_bucket),
-                "pos_rate_all": float(y_bucket.mean()) if n_bucket else float("nan"),
+            bucket_data[bucket_id] = {
+                "all": idx_all,
+                "train": train_idx_bucket,
+                "val": val_idx_bucket,
+                "parent": parent_id,
+                "children": children_map.get(bucket_id, []),
+                "is_others": str(bucket_id).endswith("=others"),
+                "level": 0 if bucket_id == "ROOT" else len(bucket_id.split("|")),
             }
 
-            if parent_id is not None:
-                n_share = max(int(n_bucket * self.parent_share_rate), self.min_parent_share)
-                n_share = min(n_share, n_bucket)
-                if n_share > 0:
-                    share_idx = self.rng.choice(idx_all, size=n_share, replace=False)
-                    parent_index_map[parent_id].extend(share_idx.tolist())
-                    log_info(f"【BTTWD】桶 {bucket_id} 向父桶 {parent_id} 贡献 {len(share_idx)} 个典型样本")
+            self.bucket_stats[bucket_id] = {
+                **self._init_bucket_record(bucket_id, parent_id, train_idx_bucket, val_idx_bucket, y),
+                "n_all": int(len(idx_all)),
+                "pos_rate_all": float(y[idx_all].mean()) if len(idx_all) else float("nan"),
+            }
 
-        # Step 4: 训练叶子桶模型（先完成叶子训练与阈值选择，再将样本贡献给父桶）
+        # Step 4: 计算 parent-share 样本
+        parent_train_map = defaultdict(list)
+        parent_val_map = defaultdict(list)
+        for parent_id, child_ids in children_map.items():
+            for child_id in child_ids:
+                child_train = bucket_data[child_id]["train"]
+                child_val = bucket_data[child_id]["val"]
+
+                share_rate = 1.0 if len(child_train) <= self.small_bucket_threshold else self.parent_share_rate
+                n_share_train = min(len(child_train), int(len(child_train) * share_rate))
+                if n_share_train > 0:
+                    share_idx = self.rng.choice(child_train, size=n_share_train, replace=False)
+                    parent_train_map[parent_id].extend(share_idx.tolist())
+
+                share_rate_val = 1.0 if len(child_val) <= self.small_bucket_threshold else self.parent_share_rate
+                n_share_val = min(len(child_val), int(len(child_val) * share_rate_val))
+                if n_share_val > 0:
+                    share_val_idx = self.rng.choice(child_val, size=n_share_val, replace=False)
+                    parent_val_map[parent_id].extend(share_val_idx.tolist())
+
+            if len(parent_train_map[parent_id]) < self.min_parent_share:
+                all_child_train = np.concatenate([bucket_data[c]["train"] for c in child_ids]) if child_ids else np.array([], dtype=int)
+                parent_train_map[parent_id] = all_child_train.tolist()
+            if len(parent_val_map[parent_id]) < self.min_parent_share:
+                all_child_val = np.concatenate([bucket_data[c]["val"] for c in child_ids]) if child_ids else np.array([], dtype=int)
+                parent_val_map[parent_id] = all_child_val.tolist()
+
+            bucket_data[parent_id]["train_share"] = np.array(parent_train_map[parent_id], dtype=int)
+            bucket_data[parent_id]["val_share"] = np.array(parent_val_map[parent_id], dtype=int)
+
+        # Step 5: 训练所有桶（包含内部节点）并判定强弱
         self.bucket_models = {}
         self.bucket_thresholds = {}
+        bucket_scores = {}
 
         if self.bucket_estimator is None:
             log_info("【BTTWD】bucket_estimator=none：不训练桶内局部模型，仅使用全局模型概率做桶内阈值搜索")
 
-        for bucket_id, idx_all in leaf_index_map.items():
-            idx_all = np.asarray(idx_all)
-            y_all = y[idx_all]
+        if len(inner_val_idx) > 0:
+            global_metrics = self._calc_bucket_metrics(proba_all[inner_val_idx], y[inner_val_idx])
+            global_score = compute_bucket_score(global_metrics, self.score_cfg)
+        else:
+            global_score = None
 
-            train_mask = np.isin(idx_all, inner_train_idx)
-            val_mask = np.isin(idx_all, inner_val_idx)
+        def _get_bucket_dataset(bid: str):
+            data = bucket_data.get(bid, {})
+            if data.get("children"):
+                train_idx = data.get("train_share", data.get("train", np.array([], dtype=int)))
+                val_idx = data.get("val_share", data.get("val", np.array([], dtype=int)))
+            else:
+                train_idx = data.get("train", np.array([], dtype=int))
+                val_idx = data.get("val", np.array([], dtype=int))
+            return train_idx, val_idx
 
-            train_idx_bucket = idx_all[train_mask]
-            val_idx_bucket = idx_all[val_mask]
+        ordered_buckets = sorted(bucket_data.keys(), key=lambda b: bucket_data[b]["level"])
+        for bucket_id in ordered_buckets:
+            data = bucket_data[bucket_id]
+            parent_id = data.get("parent")
+            train_idx, val_idx = _get_bucket_dataset(bucket_id)
+            y_train_bucket = y[train_idx]
+            y_val_bucket = y[val_idx]
 
-            y_train_bucket = y[train_idx_bucket]
-            y_val_bucket = y[val_idx_bucket]
+            record = self.bucket_stats.get(bucket_id)
+            record["n_train"] = int(len(train_idx))
+            record["n_val"] = int(len(val_idx))
 
-            record = self.bucket_stats[bucket_id]
-
-            info = self.bucket_info.get(
-                bucket_id,
-                {
-                    "n_samples": len(idx_all),
-                    "is_strong": len(idx_all) >= self.min_samples_for_thresholds
-                    and np.unique(y_all).size >= 2,
-                    "parent_bucket_id": parent_id,
-                },
-            )
-
-            if len(y_train_bucket) == 0 or np.unique(y_train_bucket).size < 2:
-                log_info(f"【BTTWD】叶子桶 {bucket_id} 训练样本不足或单类，使用父桶/全局阈值")
-                record["use_parent_threshold"] = True
-                continue
-
+            is_others = data.get("is_others", False)
             model = None
-            if self.bucket_estimator is not None:
+            if not is_others and self.bucket_estimator is not None and len(np.unique(y_train_bucket)) >= 2 and len(y_train_bucket) > 0:
                 model = self._build_bucket_estimator()
-                X_train_bucket = X[train_idx_bucket]
-                X_train_bucket, y_train_bucket = self._sample_bucket_data(
-                    X_train_bucket, y_train_bucket, bucket_id
-                )
+                X_train_bucket = X[train_idx]
+                X_train_bucket, y_train_bucket = self._sample_bucket_data(X_train_bucket, y_train_bucket, bucket_id)
                 model.fit(X_train_bucket, y_train_bucket)
                 self.bucket_models[bucket_id] = model
 
-            if not info["is_strong"]:
-                record["use_parent_threshold"] = True
-                continue
+            enough_val = len(val_idx) >= self.min_val_samples_per_bucket and np.unique(y_val_bucket).size >= 2 and not is_others
+            bucket_score = None
+            alpha = beta = None
+            stats = {}
+            if enough_val:
+                if model is None:
+                    if self.global_model is not None:
+                        proba_val = self.global_model.predict_proba(X[val_idx])[:, 1]
+                    else:
+                        proba_val = np.full(len(val_idx), self.global_pos_rate)
+                else:
+                    proba_val = model.predict_proba(X[val_idx])[:, 1]
+                alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
+                bucket_score = compute_bucket_score({"regret": stats.get("regret", np.nan), "bac": stats.get("bac", np.nan)}, self.score_cfg)
+                self.bucket_thresholds[bucket_id] = (alpha, beta)
 
-            if len(val_idx_bucket) < self.min_val_samples_per_bucket or np.unique(y_val_bucket).size < 2:
+            parent_score = bucket_scores.get(parent_id) if parent_id in bucket_scores else global_score
+            gain_like = None
+            if bucket_score is not None and parent_score is not None:
+                gain_like = bucket_score - parent_score
+
+            weak_due_to_size = len(val_idx) < self.min_val_samples_per_bucket or is_others
+            weak_due_to_gain = gain_like is not None and gain_like < self.min_gain_for_split
+            status = "strong"
+            if weak_due_to_size or bucket_score is None or weak_due_to_gain:
+                status = "weak"
+
+            self.bucket_info[bucket_id] = {
+                "n_samples": int(len(data.get("all", []))),
+                "parent_bucket_id": parent_id,
+                "status": status,
+                "gain_like": gain_like,
+            }
+            if bucket_score is not None:
+                bucket_scores[bucket_id] = bucket_score
+
+            record.update(
+                {
+                    "alpha": float(alpha) if alpha is not None else float("nan"),
+                    "beta": float(beta) if beta is not None else float("nan"),
+                    "regret_val": float(stats.get("regret", np.nan)),
+                    "F1_val": float(stats.get("f1", np.nan)),
+                    "Precision_val": float(stats.get("precision", np.nan)),
+                    "Recall_val": float(stats.get("recall", np.nan)),
+                    "BND_ratio_val": float(stats.get("bnd_ratio", np.nan)),
+                    "pos_coverage_val": float(stats.get("pos_coverage", np.nan)),
+                    "threshold_n_samples": int(stats.get("n_samples", 0)),
+                    "use_parent_threshold": status == "weak",
+                }
+            )
+
+            if status == "strong" and alpha is not None and beta is not None:
                 log_info(
-                    f"【BTTWD】叶子桶 {bucket_id} 验证样本不足或单类，阈值回退父桶/全局"
+                    f"【阈值】桶 {bucket_id}（n_val={len(val_idx)}）使用本地阈值 α={alpha:.4f}, β={beta:.4f}",
                 )
-                record["use_parent_threshold"] = True
-                continue
+            elif status == "weak":
+                log_info(f"【阈值】桶 {bucket_id} 标记为弱桶，阈值回退父桶/全局")
 
-            if model is None:
-                if self.global_model is not None:
-                    proba_val = self.global_model.predict_proba(X[val_idx_bucket])[:, 1]
-                else:
-                    proba_val = np.full(len(val_idx_bucket), self.global_pos_rate)
-            else:
-                proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
-            alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
+        if "ROOT" in self.bucket_info:
+            self.bucket_info["ROOT"]["status"] = "strong"
 
-            self.bucket_thresholds[bucket_id] = (alpha, beta)
-
-            record.update(
-                {
-                    "alpha": float(alpha),
-                    "beta": float(beta),
-                    "regret_val": float(stats.get("regret", np.nan)),
-                    "F1_val": float(stats.get("f1", np.nan)),
-                    "Precision_val": float(stats.get("precision", np.nan)),
-                    "Recall_val": float(stats.get("recall", np.nan)),
-                    "BND_ratio_val": float(stats.get("bnd_ratio", np.nan)),
-                    "pos_coverage_val": float(stats.get("pos_coverage", np.nan)),
-                    "threshold_n_samples": int(stats.get("n_samples", 0)),
-                }
-            )
-
-            log_info(
-                f"【阈值】桶 {bucket_id}（n={info['n_samples']}）使用本地阈值 α={alpha:.4f}, β={beta:.4f}"
-            )
-
-        # Step 5: 训练父桶模型（在叶子贡献样本后进行）
-        for parent_id, idx_list in parent_index_map.items():
-            idx_all = np.array(sorted(set(idx_list)))
-            y_all = y[idx_all]
-
-            train_mask = np.isin(idx_all, inner_train_idx)
-            val_mask = np.isin(idx_all, inner_val_idx)
-
-            train_idx_bucket = idx_all[train_mask]
-            val_idx_bucket = idx_all[val_mask]
-
-            y_train_bucket = y[train_idx_bucket]
-            y_val_bucket = y[val_idx_bucket]
-
-            record = self.bucket_stats.get(parent_id)
+        for bucket_id, data in bucket_data.items():
+            record = self.bucket_stats.get(bucket_id)
             if record is None:
-                record = self._init_bucket_record(parent_id, get_parent_bucket_id(parent_id), train_idx_bucket, val_idx_bucket, y)
-                record["n_all"] = int(len(idx_all))
-                record["pos_rate_all"] = float(y_all.mean()) if len(y_all) else float("nan")
-                self.bucket_stats[parent_id] = record
-
-            parent_info = self.bucket_info.get(parent_id)
-            if parent_info is None:
-                parent_info = {
-                    "n_samples": int(len(idx_all)),
-                    "is_strong": len(idx_all) >= self.min_samples_for_thresholds
-                    and np.unique(y_all).size >= 2,
-                    "parent_bucket_id": get_parent_bucket_id(parent_id),
-                }
-                self.bucket_info[parent_id] = parent_info
-            else:
-                parent_info["n_samples"] = int(len(idx_all))
-                parent_info["is_strong"] = parent_info["n_samples"] >= self.min_samples_for_thresholds and np.unique(y_all).size >= 2
-
-            if len(y_train_bucket) == 0 or np.unique(y_train_bucket).size < 2:
-                log_info(f"【BTTWD】父桶 {parent_id} 训练样本不足或单类，使用父桶/全局阈值")
-                record["use_parent_threshold"] = True
                 continue
-
-            model = None
-            if self.bucket_estimator is not None:
-                model = self._build_bucket_estimator()
-                X_train_bucket = X[train_idx_bucket]
-                X_train_bucket, y_train_bucket = self._sample_bucket_data(
-                    X_train_bucket, y_train_bucket, parent_id
-                )
-                model.fit(X_train_bucket, y_train_bucket)
-                self.bucket_models[parent_id] = model
-
-            if not parent_info["is_strong"]:
-                record["use_parent_threshold"] = True
-                continue
-
-            if len(val_idx_bucket) < self.min_val_samples_per_bucket or np.unique(y_val_bucket).size < 2:
-                log_info(f"【BTTWD】父桶 {parent_id} 验证样本不足或单类，阈值回退父桶/全局")
-                record["use_parent_threshold"] = True
-                continue
-
-            if model is None:
-                if self.global_model is not None:
-                    proba_val = self.global_model.predict_proba(X[val_idx_bucket])[:, 1]
-                else:
-                    proba_val = np.full(len(val_idx_bucket), self.global_pos_rate)
-            else:
-                proba_val = model.predict_proba(X[val_idx_bucket])[:, 1]
-            alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
-
-            self.bucket_thresholds[parent_id] = (alpha, beta)
-
-            record.update(
-                {
-                    "alpha": float(alpha),
-                    "beta": float(beta),
-                    "regret_val": float(stats.get("regret", np.nan)),
-                    "F1_val": float(stats.get("f1", np.nan)),
-                    "Precision_val": float(stats.get("precision", np.nan)),
-                    "Recall_val": float(stats.get("recall", np.nan)),
-                    "BND_ratio_val": float(stats.get("bnd_ratio", np.nan)),
-                    "pos_coverage_val": float(stats.get("pos_coverage", np.nan)),
-                    "threshold_n_samples": int(stats.get("n_samples", 0)),
-                }
-            )
-
-            log_info(
-                f"【阈值】桶 {parent_id}（n={parent_info['n_samples']}）使用本地阈值 α={alpha:.4f}, β={beta:.4f}"
-            )
+            train_idx, val_idx = _get_bucket_dataset(bucket_id)
+            record["n_train"] = int(len(train_idx))
+            record["n_val"] = int(len(val_idx))
+            record["pos_rate_train"] = float(y[train_idx].mean()) if len(train_idx) else float("nan")
+            record["pos_rate_val"] = float(y[val_idx].mean()) if len(val_idx) else float("nan")
 
         # 对未单独训练阈值的桶补充阈值（继承父桶或全局阈值）
         for bucket_id, info in self.bucket_info.items():
@@ -793,22 +691,16 @@ class BTTWDModel:
             ancestor = parent_id
             inherited_from = None
             while ancestor:
-                if ancestor in self.bucket_thresholds:
+                if ancestor in self.bucket_thresholds and self.bucket_info.get(ancestor, {}).get("status") == "strong":
                     inherited_from = ancestor
                     break
                 ancestor = self.bucket_info.get(ancestor, {}).get("parent_bucket_id")
 
             if inherited_from is not None:
                 self.bucket_thresholds[bucket_id] = self.bucket_thresholds[inherited_from]
-                log_info(
-                    f"【阈值】桶 {bucket_id}（n={info['n_samples']}）为弱桶，回退使用父桶 {inherited_from} 的阈值"
-                )
                 parent_with_threshold = inherited_from
             else:
                 self.bucket_thresholds[bucket_id] = (self.global_alpha, self.global_beta)
-                log_info(
-                    f"【阈值】桶 {bucket_id}（n={info['n_samples']}）为弱桶且父桶不可用，回退使用全局阈值"
-                )
                 parent_with_threshold = None
 
             record = self.bucket_stats.get(bucket_id)
@@ -862,7 +754,8 @@ class BTTWDModel:
         )
 
     def predict_proba(self, X: np.ndarray, X_df_for_bucket: pd.DataFrame) -> np.ndarray:
-        bucket_ids = self.bucket_tree.assign_buckets(X_df_for_bucket)
+        bucket_parts = self.bucket_tree.assign_bucket_parts(X_df_for_bucket)
+        bucket_ids = self._route_bucket_ids(bucket_parts)
         proba = np.zeros(len(X))
 
         if self.bucket_estimator is None:
@@ -887,7 +780,8 @@ class BTTWDModel:
 
     def predict(self, X: np.ndarray, X_df_for_bucket: pd.DataFrame) -> np.ndarray:
         proba = self.predict_proba(X, X_df_for_bucket)
-        bucket_ids = self.bucket_tree.assign_buckets(X_df_for_bucket)
+        bucket_parts = self.bucket_tree.assign_bucket_parts(X_df_for_bucket)
+        bucket_ids = self._route_bucket_ids(bucket_parts)
 
         preds = np.zeros(len(proba))
         for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
