@@ -84,6 +84,15 @@ def _apply_target_transform(df: pd.DataFrame, data_cfg: dict) -> tuple[pd.DataFr
     if not transform_cfg:
         return df, target_col
 
+    force_transform = transform_cfg.get("force", False)
+    if not force_transform:
+        unique_vals = set(df[target_col].dropna().unique())
+        if unique_vals and unique_vals.issubset({0, 1}):
+            log_info(
+                f"【数据加载】目标列 {target_col} 已是二元标签 {sorted(unique_vals)}，跳过 target_transform"
+            )
+            return df, target_col
+
     transform_type = transform_cfg.get("type")
     if transform_type == "threshold_binary":
         threshold = transform_cfg.get("threshold", 0.0)
