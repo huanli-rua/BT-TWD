@@ -104,10 +104,10 @@ THRESHOLDS:
   objective: "regret"                                             # 当前实现固定以 regret 为主目标，BAC/F1/BND 仅作 tie-breaker
   alpha_init: 0.6                                                  # 正类阈值初始值
   beta_init: 0.2                                                   # 负类阈值初始值
-  alpha_grid: []                                                   # 留空表示以 alpha_init 为中心随机采样 search_grid_size 个候选 α
-  beta_grid: []                                                    # 留空表示以 beta_init 为中心随机采样 search_grid_size 个候选 β
+  alpha_grid: [0.3,0.4,0.5,0.6, 0.7, 0.8, 0.9]         # α 候选，BAC、F1、AUC 等指标也会记录到 bucket_metrics_gain.csv 便于分析
+  beta_grid: [0.1, 0.2, 0.3, 0.4,0.5,0.6]          # β 候选
   search_grid_size: 50                                             # 随机候选阈值的组合数
-  gap_min: 0.0                                                     # α、β 最小间隔限制，0 表示允许 α=β（即没有 BND 区间）
+  gap_min: 0.1                                                     # α、β 最小间隔限制，0 表示允许 α=β（即没有 BND 区间）
   min_samples_for_thresholds: 100                                  # 桶内验证样本 ≥ 100 才触发该桶的随机阈值搜索，否则直接继承父桶/ROOT 阈值
   max_iter: 100                                                    # 阈值搜索最大迭代次数占位
   costs:                                                           # 三支决策成本
@@ -126,7 +126,7 @@ BASELINES:
 
   common:
     threshold_mode: "fixed"                                        # 阈值模式：固定 or 每模型单独
-    fixed_threshold: 0.5                                           # 全局默认阈值
+    fixed_threshold: 0.2                                           # 全局默认阈值
 
   logreg:
     C: 1.0                                                         # 逻辑回归正则化强度
