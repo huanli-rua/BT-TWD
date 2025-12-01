@@ -22,6 +22,8 @@ from .baselines import (
     train_eval_random_forest,
     train_eval_xgboost,
 )
+from .baseline_analyzer import run_baseline_bucket_evaluation
+from .bucket_rules import BucketTree
 from .metrics import (
     compute_binary_metrics,
     compute_s3_metrics,
@@ -110,8 +112,15 @@ def _eval_baseline_holdout(model_key: str, X_train, y_train, X_test, y_test, cfg
     metrics_dict["model"] = model_key
     return metrics_dict
 
-def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None):
+def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None, bucket_tree: BucketTree | None = None, results_dir=None):
     """训练/评估单次切分的 BTTWD 模型并返回指标。"""
+
+    repo_root = Path(__file__).resolve().parent.parent
+    if results_dir is None:
+        configured_results_dir = cfg.get("OUTPUT", {}).get("results_dir", "results")
+        results_dir = Path(configured_results_dir)
+        if not results_dir.is_absolute():
+            results_dir = repo_root / results_dir
 
     split_cfg = cfg.get("DATA", {}).get("split", {})
     val_ratio = split_cfg.get("val_ratio", 0.1)
@@ -167,17 +176,25 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None):
     log_info("【测试集指标-S3】" + ", ".join([f"{k}={v:.4f}" for k, v in metrics_s3.items()]))
     log_info("【测试集指标-二分类】" + ", ".join([f"{k}={v:.4f}" for k, v in metrics_binary.items()]))
 
+    run_baseline_bucket_evaluation(
+        X=X,
+        y=y,
+        bucket_df_for_split=bucket_df,
+        bucket_tree=model.bucket_tree,
+        cfg=cfg,
+        results_dir=results_dir,
+    )
+
     return {"metrics_s3": metrics_s3, "metrics_binary": metrics_binary}
 
 
-def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None) -> dict:
+def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tree: BucketTree | None = None) -> dict:
     repo_root = Path(__file__).resolve().parent.parent
     configured_results_dir = cfg.get("OUTPUT", {}).get("results_dir", "results")
     results_dir = Path(configured_results_dir)
     if not results_dir.is_absolute():
         results_dir = repo_root / results_dir
     os.makedirs(results_dir, exist_ok=True)
-
     n_splits = cfg.get("DATA", {}).get("n_splits", 5)
     shuffle = cfg.get("DATA", {}).get("shuffle", True)
     random_state = cfg.get("DATA", {}).get("random_state", 42)
@@ -203,6 +220,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None) -> dict:
         baseline_results["XGBoost"] = train_eval_xgboost(X, y, cfg, skf, costs=threshold_costs)
 
     fold_idx = 1
+    model: BTTWDModel | None = None
     for train_idx, test_idx in skf.split(X, y):
         log_info(f"【K折实验】正在执行第 {fold_idx}/{n_splits} 折...")
         X_train, X_test = X[train_idx], X[test_idx]
@@ -213,6 +231,8 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None) -> dict:
 
         bttwd_model = BTTWDModel.from_cfg(cfg, feature_names=X_df_for_bucket.columns.tolist())
         bttwd_model.fit(X_train, y_train, X_df_train)
+
+        model = bttwd_model
 
         y_score = bttwd_model.predict_proba(X_test, X_df_test)
         y_pred_s3 = bttwd_model.predict(X_test, X_df_test)
@@ -360,5 +380,16 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None) -> dict:
     if overview_records:
         pd.DataFrame(overview_records).to_csv(os.path.join(results_dir, "metrics_overview.csv"), index=False)
     log_info("【K折实验】所有结果已写入 results 目录")
+
+    bucket_tree_for_baseline = model.bucket_tree if model is not None else None
+
+    run_baseline_bucket_evaluation(
+        X=X,
+        y=y,
+        bucket_df_for_split=X_df_for_bucket,
+        bucket_tree=bucket_tree_for_baseline,
+        cfg=cfg,
+        results_dir=results_dir,
+    )
 
     return {"baselines": baseline_results, "bttwd": {"per_fold": per_fold_records, "summary": summary_rows}}
