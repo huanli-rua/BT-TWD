@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Hashable, Optional, Set
 
 import numpy as np
 import pandas as pd
@@ -38,11 +39,74 @@ def run_baseline_bucket_evaluation(
     bucket_tree,
     cfg,
     results_dir,
+    strong_buckets: Optional[Set[Hashable]] = None,
 ):
     bttwd_cfg = cfg.get("BTTWD", {})
     data_cfg = cfg.get("DATA", {})
     threshold_cfg = cfg.get("THRESHOLDS", {})
     cost_cfg = threshold_cfg.get("costs", {})
+    baseline_columns = [
+        "bucket_id",
+        "Precision",
+        "Recall",
+        "F1",
+        "BAC",
+        "AUC",
+        "MCC",
+        "Kappa",
+        "Regret",
+        "BND_ratio",
+        "POS_Coverage",
+        "n_samples",
+        "alpha",
+        "beta",
+    ]
+
+    if strong_buckets is not None and len(strong_buckets) == 0:
+        log_info("[BASELINE] 无强桶，本轮不产生 baseline 桶指标")
+        results_path = _prepare_results_dir(results_dir)
+        baseline_df = pd.DataFrame(columns=baseline_columns)
+        baseline_path = results_path / "baseline_bucket_metrics.csv"
+        baseline_df.to_csv(baseline_path, index=False)
+
+        gain_path = results_path / "bucket_metrics_gain.csv"
+        if gain_path.exists():
+            gain_df = pd.read_csv(gain_path)
+        else:
+            gain_df = pd.DataFrame(columns=["bucket_id"])
+
+        baseline_merge = baseline_df[
+            [
+                "bucket_id",
+                "Precision",
+                "Recall",
+                "F1",
+                "BAC",
+                "AUC",
+                "MCC",
+                "Kappa",
+                "Regret",
+                "BND_ratio",
+                "POS_Coverage",
+            ]
+        ].rename(
+            columns={
+                "Precision": "baseline_precision",
+                "Recall": "baseline_recall",
+                "F1": "baseline_f1",
+                "BAC": "baseline_bac",
+                "AUC": "baseline_auc",
+                "MCC": "baseline_mcc",
+                "Kappa": "baseline_kappa",
+                "Regret": "baseline_regret",
+                "BND_ratio": "baseline_bnd_ratio",
+                "POS_Coverage": "baseline_pos_coverage",
+            }
+        )
+
+        merged_df = gain_df.merge(baseline_merge, on="bucket_id", how="left")
+        merged_df.to_csv(gain_path, index=False)
+        return []
 
     xgb_cfg = bttwd_cfg.get("global_xgb", {})
 
@@ -123,6 +187,7 @@ def run_baseline_bucket_evaluation(
         alpha=alpha,
         beta=beta,
         cost_cfg=cost_cfg,
+        strong_buckets=strong_buckets,
     )
 
     for rec in bucket_metrics:
@@ -140,24 +205,7 @@ def run_baseline_bucket_evaluation(
     baseline_path = results_path / "baseline_bucket_metrics.csv"
     baseline_df = pd.DataFrame(bucket_metrics)
     if baseline_df.empty:
-        baseline_df = pd.DataFrame(
-            columns=[
-                "bucket_id",
-                "Precision",
-                "Recall",
-                "F1",
-                "BAC",
-                "AUC",
-                "MCC",
-                "Kappa",
-                "Regret",
-                "BND_ratio",
-                "POS_Coverage",
-                "n_samples",
-                "alpha",
-                "beta",
-            ]
-        )
+        baseline_df = pd.DataFrame(columns=baseline_columns)
     baseline_df.to_csv(baseline_path, index=False)
     log_info("[BASELINE] baseline_bucket_metrics.csv 写出完成")
 
