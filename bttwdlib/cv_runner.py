@@ -176,6 +176,20 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None, bucket_tree: 
     log_info("【测试集指标-S3】" + ", ".join([f"{k}={v:.4f}" for k, v in metrics_s3.items()]))
     log_info("【测试集指标-二分类】" + ", ".join([f"{k}={v:.4f}" for k, v in metrics_binary.items()]))
 
+    bucket_info = model.bucket_info
+    strong_buckets = {
+        bid
+        for bid, info in bucket_info.items()
+        if info.get("is_leaf", False) and not info.get("is_weak", False)
+    }
+    log_info(f"[BASELINE] 按 is_weak 标记检测到的叶子强桶数量 = {len(strong_buckets)}")
+
+    if not strong_buckets:
+        log_info("[BASELINE] 未发现非弱叶子桶，将所有叶子桶视为强桶用于 baseline 评估")
+        strong_buckets = {bid for bid, info in bucket_info.items() if info.get("is_leaf", False)}
+
+    log_info(f"[BASELINE] 最终用于 baseline 评估的强桶数量 = {len(strong_buckets)}")
+
     run_baseline_bucket_evaluation(
         X=X,
         y=y,
@@ -183,6 +197,7 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None, bucket_tree: 
         bucket_tree=model.bucket_tree,
         cfg=cfg,
         results_dir=results_dir,
+        strong_buckets=strong_buckets,
     )
 
     return {"metrics_s3": metrics_s3, "metrics_binary": metrics_binary}
@@ -383,13 +398,33 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
 
     bucket_tree_for_baseline = model.bucket_tree if model is not None else None
 
-    run_baseline_bucket_evaluation(
-        X=X,
-        y=y,
-        bucket_df_for_split=X_df_for_bucket,
-        bucket_tree=bucket_tree_for_baseline,
-        cfg=cfg,
-        results_dir=results_dir,
-    )
+    strong_buckets = None
+    if model is not None:
+        bucket_info = model.bucket_info
+        strong_buckets = {
+            bid
+            for bid, info in bucket_info.items()
+            if info.get("is_leaf", False) and not info.get("is_weak", False)
+        }
+        log_info(f"[BASELINE] 按 is_weak 标记检测到的叶子强桶数量 = {len(strong_buckets)}")
+
+        if not strong_buckets:
+            log_info("[BASELINE] 未发现非弱叶子桶，将所有叶子桶视为强桶用于 baseline 评估")
+            strong_buckets = {bid for bid, info in bucket_info.items() if info.get("is_leaf", False)}
+
+        log_info(f"[BASELINE] 最终用于 baseline 评估的强桶数量 = {len(strong_buckets)}")
+
+    if bucket_tree_for_baseline is None:
+        log_info("[BASELINE] 未检测到 bucket tree，跳过基线桶级评估")
+    else:
+        run_baseline_bucket_evaluation(
+            X=X,
+            y=y,
+            bucket_df_for_split=X_df_for_bucket,
+            bucket_tree=bucket_tree_for_baseline,
+            cfg=cfg,
+            results_dir=results_dir,
+            strong_buckets=strong_buckets,
+        )
 
     return {"baselines": baseline_results, "bttwd": {"per_fold": per_fold_records, "summary": summary_rows}}

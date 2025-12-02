@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Hashable, Optional, Set
 
 import numpy as np
 import pandas as pd
@@ -38,6 +39,7 @@ def run_baseline_bucket_evaluation(
     bucket_tree,
     cfg,
     results_dir,
+    strong_buckets: Optional[Set[Hashable]] = None,
 ):
     bttwd_cfg = cfg.get("BTTWD", {})
     data_cfg = cfg.get("DATA", {})
@@ -123,6 +125,7 @@ def run_baseline_bucket_evaluation(
         alpha=alpha,
         beta=beta,
         cost_cfg=cost_cfg,
+        strong_buckets=strong_buckets,
     )
 
     for rec in bucket_metrics:

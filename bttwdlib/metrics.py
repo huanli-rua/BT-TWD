@@ -1,6 +1,9 @@
+from typing import Hashable, Optional, Set
+
 import numpy as np
 import pandas as pd
 from sklearn import metrics as skm
+
 from .utils_logging import log_info
 from .threshold_search import compute_regret
 
@@ -81,14 +84,29 @@ def compute_s3_metrics(y_true, y_s3_pred, y_score, cfg_metrics, costs: dict | No
     return metrics_dict
 
 
-def evaluate_baseline_by_buckets(y_true, y_score, bucket_series, alpha, beta, cost_cfg) -> list[dict]:
-    """使用全局后验与阈值在每个桶上评估基线指标。"""
+def evaluate_baseline_by_buckets(
+    y_true,
+    y_score,
+    bucket_series,
+    alpha,
+    beta,
+    cost_cfg,
+    strong_buckets: Optional[Set[Hashable]] = None,
+) -> list[dict]:
+    """
+    使用全局后验与阈值在每个桶上评估基线指标。
+
+    若传入 ``strong_buckets``，仅对其中的强桶做全局阈值评估。
+    """
 
     df = pd.DataFrame({"y_true": y_true, "y_score": y_score, "bucket_id": bucket_series})
     metrics_cfg = {"use_metrics": ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa"]}
     results = []
 
     for bucket_id, group in df.groupby("bucket_id"):
+        # 若指定强桶集合，则只对强桶评估
+        if strong_buckets is not None and bucket_id not in strong_buckets:
+            continue
         y_true_bucket = group["y_true"].to_numpy()
         y_score_bucket = group["y_score"].to_numpy()
         y_pred_s3 = np.where(y_score_bucket >= alpha, 1, np.where(y_score_bucket <= beta, 0, -1))
