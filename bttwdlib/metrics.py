@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn import metrics as skm
+from .bucket_rules import get_parent_bucket_id
 from .utils_logging import log_info
 from .threshold_search import compute_regret
 
@@ -81,14 +82,42 @@ def compute_s3_metrics(y_true, y_s3_pred, y_score, cfg_metrics, costs: dict | No
     return metrics_dict
 
 
-def evaluate_baseline_by_buckets(y_true, y_score, bucket_series, alpha, beta, cost_cfg) -> list[dict]:
-    """使用全局后验与阈值在每个桶上评估基线指标。"""
+def evaluate_baseline_by_buckets(
+    y_true,
+    y_score,
+    bucket_series,
+    alpha,
+    beta,
+    cost_cfg,
+    include_parents: bool = False,
+) -> list[dict]:
+    """使用全局后验与阈值在桶/父桶上评估基线指标。"""
 
     df = pd.DataFrame({"y_true": y_true, "y_score": y_score, "bucket_id": bucket_series})
     metrics_cfg = {"use_metrics": ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa"]}
     results = []
 
-    for bucket_id, group in df.groupby("bucket_id"):
+    bucket_ids = list(pd.unique(bucket_series))
+    if include_parents:
+        visited = set(bucket_ids)
+        for bid in list(bucket_ids):
+            parent = get_parent_bucket_id(bid)
+            while parent:
+                if parent not in visited:
+                    bucket_ids.append(parent)
+                    visited.add(parent)
+                parent = get_parent_bucket_id(parent)
+
+    for bucket_id in bucket_ids:
+        if include_parents:
+            mask = df["bucket_id"].str.startswith(f"{bucket_id}|") | (df["bucket_id"] == bucket_id)
+            group = df[mask]
+        else:
+            group = df[df["bucket_id"] == bucket_id]
+
+        if group.empty:
+            continue
+
         y_true_bucket = group["y_true"].to_numpy()
         y_score_bucket = group["y_score"].to_numpy()
         y_pred_s3 = np.where(y_score_bucket >= alpha, 1, np.where(y_score_bucket <= beta, 0, -1))
