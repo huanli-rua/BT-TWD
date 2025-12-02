@@ -123,6 +123,7 @@ def run_baseline_bucket_evaluation(
         alpha=alpha,
         beta=beta,
         cost_cfg=cost_cfg,
+        include_parents=True,
     )
 
     for rec in bucket_metrics:
