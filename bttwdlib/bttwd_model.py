@@ -192,18 +192,22 @@ class BTTWDModel:
         bcfg = cfg.get("BTTWD", {})
 
         if not isinstance(score_cfg, dict):
-            score_metric = bcfg.get("score_metric", "bac_regret")
+            score_metric = bcfg.get("score_metric", "f1_regret_bnd")
             return {
                 "bucket_score_mode": score_metric,
-                "bac_weight": 1.0,
+                "f1_weight": 1.0,
                 "regret_weight": 1.0,
-                "regret_sign": -1.0,
+                "bnd_weight": 1.0,
             }
 
         merged_cfg = dict(score_cfg)
-        merged_cfg.setdefault("bucket_score_mode", score_cfg.get("score_metric", bcfg.get("score_metric", "bac_regret")))
-        merged_cfg.setdefault("bac_weight", 1.0)
+        merged_cfg.setdefault(
+            "bucket_score_mode", score_cfg.get("score_metric", bcfg.get("score_metric", "f1_regret_bnd"))
+        )
+        merged_cfg.setdefault("f1_weight", 1.0)
+        merged_cfg.setdefault("bnd_weight", 1.0)
         merged_cfg.setdefault("regret_weight", 1.0)
+        merged_cfg.setdefault("bac_weight", 1.0)
         merged_cfg.setdefault("regret_sign", -1.0)
         return merged_cfg
 
@@ -560,11 +564,19 @@ class BTTWDModel:
         return self._build_bucket_tree_carve(bucket_parts, y)
 
     def fit(self, X: np.ndarray, y: np.ndarray, X_df_for_bucket: pd.DataFrame):
-        log_info(
-            "[BT] 使用桶评分配置：mode="
-            f"{self.score_cfg.get('bucket_score_mode')}, bac_weight={self.score_cfg.get('bac_weight')}, "
-            f"regret_weight={self.score_cfg.get('regret_weight')}, regret_sign={self.score_cfg.get('regret_sign')}"
-        )
+        score_mode = self.score_cfg.get("bucket_score_mode")
+        if str(score_mode).lower() == "f1_regret_bnd":
+            log_info(
+                "[BT] 使用桶评分配置：mode="
+                f"{score_mode}, f1_weight={self.score_cfg.get('f1_weight')}, "
+                f"regret_weight={self.score_cfg.get('regret_weight')}, bnd_weight={self.score_cfg.get('bnd_weight')}"
+            )
+        else:
+            log_info(
+                "[BT] 使用桶评分配置：mode="
+                f"{score_mode}, bac_weight={self.score_cfg.get('bac_weight')}, "
+                f"regret_weight={self.score_cfg.get('regret_weight')}, regret_sign={self.score_cfg.get('regret_sign')}"
+            )
         # Step 0: 划分 inner 训练/验证集
         if self.val_ratio > 0:
             sss = StratifiedShuffleSplit(
@@ -766,7 +778,13 @@ class BTTWDModel:
                 else:
                     proba_val = model.predict_proba(X[val_idx])[:, 1]
                 alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
-                bucket_score = compute_bucket_score({"regret": stats.get("regret", np.nan), "bac": stats.get("bac", np.nan)}, self.score_cfg)
+                score_metrics = {
+                    "regret": stats.get("regret", np.nan),
+                    "bac": stats.get("bac", np.nan),
+                    "f1": stats.get("f1", np.nan),
+                    "BND_ratio": stats.get("bnd_ratio", np.nan),
+                }
+                bucket_score = compute_bucket_score(score_metrics, self.score_cfg)
                 self.bucket_thresholds[bucket_id] = (alpha, beta)
             else:
                 stats = {"regret": float("nan"), "f1": float("nan"), "precision": float("nan"), "recall": float("nan"), "bnd_ratio": float("nan"), "pos_coverage": float("nan"), "bac": float("nan"), "auc": float("nan"), "n_samples": 0}
