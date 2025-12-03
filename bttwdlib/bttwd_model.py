@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from collections import defaultdict, deque
 from pathlib import Path
+from sklearn.metrics import f1_score, precision_score, recall_score
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
@@ -374,7 +375,7 @@ class BTTWDModel:
 
     def _calc_bucket_metrics(self, proba: np.ndarray, y_true: np.ndarray) -> dict:
         """
-        使用当前全局阈值 alpha/beta 计算桶的结构评估指标（regret, bac）。
+        使用当前全局阈值 alpha/beta 计算桶的结构评估指标（regret, bac, f1, bnd）。
 
         注意：
         - 这里只用于“结构决策”（是否继续细分桶）；
@@ -384,6 +385,13 @@ class BTTWDModel:
 
         preds = np.where(proba >= self.global_alpha, 1, np.where(proba <= self.global_beta, 0, -1))
         regret_val = compute_regret(y_true, preds, self.costs)
+
+        pred_binary = np.where(preds == 1, 1, 0)
+        precision = precision_score(y_true, pred_binary, zero_division=0)
+        recall = recall_score(y_true, pred_binary, zero_division=0)
+        f1 = f1_score(y_true, pred_binary, zero_division=0)
+        bnd_ratio = float(np.mean(preds == -1))
+        pos_coverage = float(np.mean(preds == 1))
 
         pos_mask = y_true == 1
         neg_mask = ~pos_mask
@@ -401,7 +409,19 @@ class BTTWDModel:
         else:
             bac = 0.5 * (tpr + tnr)
 
-        return {"regret": float(regret_val), "bac": float(bac) if not np.isnan(bac) else np.nan}
+        bac_val = float(bac) if not np.isnan(bac) else np.nan
+
+        return {
+            "regret": float(regret_val),
+            "bac": bac_val,
+            "f1": float(f1),
+            "F1": float(f1),
+            "precision": float(precision),
+            "recall": float(recall),
+            "bnd_ratio": float(bnd_ratio),
+            "BND_ratio": float(bnd_ratio),
+            "pos_coverage": float(pos_coverage),
+        }
 
     def _join_bucket_id(self, parent_id: str | None, child_part: str) -> str:
         if parent_id in {None, "", "ROOT"}:
