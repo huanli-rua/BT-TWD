@@ -81,8 +81,8 @@ BTTWD:
   min_bucket_size: 30                      # 叶子桶最少样本数，分裂停止条件之一（配合 max_levels 使用）；本配置不另设正样本数门槛
   max_levels: 3                            # 桶树最大层数，达到该层后不再继续细分
   use_gain: true                           # 预留参数，增益仅用于弱桶判定和阈值回退，不控制是否分裂
-  min_gain_for_split: -0.02                # 桶增益阈值：增益小于该值的桶视为弱桶，阈值/决策优先回退到父桶或 ROOT
-  gamma_bucket: 0.002                       # 桶数复杂度惩罚系数
+  min_gain_for_split: 0.0                # 桶增益阈值：增益小于该值的桶视为弱桶，阈值/决策优先回退到父桶或 ROOT
+  gamma_bucket: 0.00                       # 桶数复杂度惩罚系数
   bucket_subsample: 1.0                    # =1.0 表示不做桶内子采样，所有训练样本都参与桶内模型训练
   max_train_samples_per_bucket: 5000       # 每个桶最多用于训练的样本数
   parent_share_rate: 0.3                  # 预留参数，当前版本代码未使用父桶样本回流逻辑，仅作为以后扩展用
