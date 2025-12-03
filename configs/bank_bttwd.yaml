@@ -42,10 +42,10 @@ PREPROCESS:
   save_feature_names: true                # 是否保存特征名以便解释
 
 SCORE:
-  bucket_score_mode: "bac_regret"                # 桶级得分仅用于弱桶判定和增益日志；分桶结构仍然只受 min_bucket_size 和 max_levels 控制
-  bac_weight: 1.0
-  regret_weight: 1.0
-  regret_sign: -1.0
+  bucket_score_mode: "f1_regret_bnd"             # 桶得分基于 F1 - λ1 * Regret - λ2 * BND_ratio，用于弱桶判定和增益计算，不控制分桶结构
+  f1_weight: 1.0                                  # F1 前的系数
+  regret_weight: 1.0                              # Regret 的惩罚权重
+  bnd_weight: 1.0                                 # BND_ratio 的惩罚权重
 
 BTTWD:
   bucket_levels:
@@ -121,7 +121,7 @@ BTTWD:
 
 THRESHOLDS:
   thresholds_mode: "bucket_wise"           # 阈值模式，目前只支持 bucket_wise；字段名要和代码中的 thresholds_mode 对应
-  objective: "regret"                     # 当前实现总是以 regret 为主目标，BAC/F1/BND 仅作平局 tie-breaker（也会在 bucket_metrics_gain.csv 记录）
+  objective: "regret"                     # 桶阈值搜索以 regret 为优化目标，F1/BND 仅记录用于分析，不参与分桶结构或分裂控制
   alpha_grid: [0.3,0.4,0.5,0.6, 0.7, 0.8, 0.9]         # α 候选，BAC、F1、AUC 等指标也会记录到 bucket_metrics_gain.csv 便于分析
   beta_grid: [0.1, 0.2, 0.3, 0.4,0.5,0.6]          # β 候选
   gap_min: 0.05                            # α、β 间隔下限
