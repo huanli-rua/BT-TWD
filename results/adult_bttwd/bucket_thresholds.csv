@@ -34,13 +34,13 @@ L1_age=old|L2_education=mid|L3_hours-per-week=normal_hours,0.4,0.2,bucket_wise,R
 L1_age=old|L2_education=top|L3_hours-per-week=high_hours,0.5,0.4,bucket_wise,L1_age=old|L2_education=top|L3_hours-per-week=high_hours,False
 L1_age=old|L2_education=top|L3_hours-per-week=low_hours,0.4,0.3,bucket_wise,L1_age=old|L2_education=top|L3_hours-per-week=low_hours,False
 L1_age=old|L2_education=top|L3_hours-per-week=normal_hours,0.4,0.3,bucket_wise,L1_age=old|L2_education=top,True
-L1_age=very_old|L2_education=high|L3_hours-per-week=high_hours,0.6,0.5,bucket_wise,L1_age=very_old|L2_education=high,True
+L1_age=very_old|L2_education=high|L3_hours-per-week=high_hours,0.4,0.2,bucket_wise,L1_age=very_old|L2_education=high|L3_hours-per-week=high_hours,False
 L1_age=very_old|L2_education=high|L3_hours-per-week=low_hours,0.6,0.5,bucket_wise,L1_age=very_old|L2_education=high,True
 L1_age=very_old|L2_education=high|L3_hours-per-week=normal_hours,0.6,0.5,bucket_wise,L1_age=very_old|L2_education=high,True
 L1_age=very_old|L2_education=low|L3_hours-per-week=normal_hours,0.4,0.2,bucket_wise,ROOT,True
 L1_age=very_old|L2_education=mid|L3_hours-per-week=high_hours,0.4,0.2,bucket_wise,ROOT,True
 L1_age=very_old|L2_education=mid|L3_hours-per-week=low_hours,0.3,0.2,bucket_wise,L1_age=very_old|L2_education=mid|L3_hours-per-week=low_hours,False
-L1_age=very_old|L2_education=mid|L3_hours-per-week=normal_hours,0.4,0.3,bucket_wise,L1_age=very_old|L2_education=mid|L3_hours-per-week=normal_hours,False
+L1_age=very_old|L2_education=mid|L3_hours-per-week=normal_hours,0.4,0.2,bucket_wise,ROOT,True
 L1_age=very_old|L2_education=top|L3_hours-per-week=high_hours,0.5,0.4,bucket_wise,L1_age=very_old|L2_education=top|L3_hours-per-week=high_hours,False
 L1_age=very_old|L2_education=top|L3_hours-per-week=low_hours,0.4,0.1,bucket_wise,L1_age=very_old|L2_education=top,True
 L1_age=very_old|L2_education=top|L3_hours-per-week=normal_hours,0.6,0.4,bucket_wise,L1_age=very_old|L2_education=top|L3_hours-per-week=normal_hours,False

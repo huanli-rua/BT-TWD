@@ -39,7 +39,7 @@ SCORE:
   bucket_score_mode: "f1_regret_bnd"   # 桶得分基于 F1 - λ1 * Regret - λ2 * BND_ratio，用于弱桶判定和增益计算，不控制分桶结构
   f1_weight: 1.0                       # F1 前的权重
   regret_weight: 1.0                   # Regret 的惩罚权重
-  bnd_weight: 1.0                      # BND_ratio 的惩罚权重
+  bnd_weight: 0.5                      # BND_ratio 的惩罚权重
 
 BTTWD:
   bucket_levels:
@@ -84,7 +84,7 @@ BTTWD:
   bucket_estimator: "none"         # 桶内局部模型类型：logreg/xgb/rf/knn/nb/none（缺省为logreg）
   posterior_estimator: "logreg"    # 后验概率校准或二分类模型类型
   logreg_C: 1.0                    # 逻辑回归的正则化强度
-  knn_k: 10                        # KNN 模型的邻居数
+  knn_k: 6                        # KNN 模型的邻居数
   bucket_rf:                       # 桶内随机森林参数
     n_estimators: 200
     max_depth: null
