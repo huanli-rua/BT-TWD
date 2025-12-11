@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
 from bttwdlib import (  # noqa: E402
     load_dataset,
     load_yaml_cfg,
+    _apply_missing_handling,
     prepare_features_and_labels,
     run_holdout_experiment,
     run_kfold_experiments,
@@ -30,10 +31,13 @@ DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "airlines_delay.yaml"
 
 
 def _build_bucket_feature_df(df_raw, cfg) -> tuple[np.ndarray, np.ndarray, object, object, object]:
-    X, y, meta = prepare_features_and_labels(df_raw, cfg)
+    prep_cfg = cfg.get("PREPROCESS", {})
+    df_prepared = _apply_missing_handling(df_raw, prep_cfg)
+
+    X, y, meta = prepare_features_and_labels(df_prepared, cfg)
     prep_cfg = cfg.get("PREPROCESS", {})
     bucket_cols: List[str] = (prep_cfg.get("continuous_cols") or []) + (prep_cfg.get("categorical_cols") or [])
-    bucket_df = df_raw[bucket_cols].reset_index(drop=True)
+    bucket_df = df_prepared[bucket_cols].reset_index(drop=True)
     return X, y, meta, bucket_df, bucket_cols
 
 
@@ -42,6 +46,7 @@ def _transform_with_pipeline(df_raw, cfg, pipeline, bucket_cols: list[str]):
 
     data_cfg = cfg.get("DATA", {})
     prep_cfg = cfg.get("PREPROCESS", {})
+    df_raw = _apply_missing_handling(df_raw, prep_cfg)
     target_col = data_cfg.get("target_col", "income")
     target_transform = data_cfg.get("target_transform") or {}
     target_col_for_model = target_transform.get("new_col", target_col)
