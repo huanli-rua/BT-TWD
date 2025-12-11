@@ -126,15 +126,15 @@ THRESHOLDS:
     C_TP: 0.0
     C_TN: 0.0
     C_FP: 1.0
-    C_FN: 2.0
-    C_BP: 0.75
+    C_FN: 4.0
+    C_BP: 1.5
     C_BN: 0.5
   min_samples_for_thresholds: 80
 
 BASELINES:
-  use_logreg: false
-  use_random_forest: false
-  use_knn: false
+  use_logreg: true
+  use_random_forest: true
+  use_knn: true
   use_xgboost: true
 
   common:

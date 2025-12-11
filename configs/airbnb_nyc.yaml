@@ -75,7 +75,7 @@ BTTWD:
       bins: [30, 180, 365]
       labels: ["rare", "mid_term", "long_term", "always_available"]
 
-  min_bucket_size: 100
+  min_bucket_size: 50
   max_levels: 3
   use_gain: true
   min_gain_for_split: 0.0
@@ -85,7 +85,7 @@ BTTWD:
   parent_share_rate: 0.2
   min_parent_share: 50
   val_ratio: 0.3
-  min_val_samples_per_bucket: 60
+  min_val_samples_per_bucket: 20
   use_global_backoff: true
   global_estimator: "xgb"
   bucket_estimator: "none"
@@ -126,8 +126,8 @@ THRESHOLDS:
     C_TP: 0.0
     C_TN: 0.0
     C_FP: 1.0
-    C_FN: 1.0
-    C_BP: 0.5
+    C_FN: 4.0
+    C_BP: 1.5
     C_BN: 0.5
   min_samples_for_thresholds: 150
 
@@ -139,7 +139,7 @@ BASELINES:
 
   common:
     threshold_mode: "fixed"
-    fixed_threshold: 0.4
+    fixed_threshold: 0.3
   logreg:
     C: 1.0
     max_iter: 500

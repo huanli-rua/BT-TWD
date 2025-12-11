@@ -32,7 +32,7 @@ PREPROCESS:
     - "Contract"
     - "PaperlessBilling"
     - "PaymentMethod"
-  handle_missing: "none"
+  handle_missing: "simple"
   fillna_strategy: "most_frequent"
   scale_continuous: true
   scaler_type: "standard"
@@ -126,7 +126,7 @@ THRESHOLDS:
     C_TN: 0.0
     C_FP: 1.0
     C_FN: 5.0
-    C_BP: 1.0
+    C_BP: 1.5
     C_BN: 0.5
   min_samples_for_thresholds: 60
 
@@ -138,7 +138,7 @@ BASELINES:
 
   common:
     threshold_mode: "fixed"
-    fixed_threshold: 0.4
+    fixed_threshold: 0.2
   logreg:
     C: 1.0
     max_iter: 500
