@@ -30,7 +30,7 @@ PREPROCESS:
     - "neighbourhood_group"
     - "neighbourhood"
     - "room_type"
-  handle_missing: "none"
+  handle_missing: "simple"
   fillna_strategy: "most_frequent"
   scale_continuous: true
   scaler_type: "standard"
