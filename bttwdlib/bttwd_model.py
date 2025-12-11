@@ -30,7 +30,7 @@ class BTTWDModel:
 
         bcfg = cfg.get("BTTWD", {})
         data_cfg = cfg.get("DATA", {})
-        thresh_cfg = cfg.get("THRESHOLDS", {})
+        thresh_cfg = cfg.get("THRESHOLD") or cfg.get("THRESHOLDS", {})
 
         self.min_bucket_size = bcfg.get("min_bucket_size", 50)
         self.min_pos_per_bucket = bcfg.get("min_pos_per_bucket", 0)

@@ -205,6 +205,35 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
                     "【数据加载】银行营销数据集已读取，标签已映射为0/1，"
                     f"样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
                 )
+            elif dataset_name_lower == "hospital_readmissions":
+                df = _load_csv_like(raw_path, data_cfg)
+                target_col = data_cfg.get("target_col", "readmitted")
+                if target_col not in df.columns:
+                    raise KeyError(f"医院再入院数据集中未找到标签列 {target_col}")
+                df[target_col] = df[target_col].astype(str).str.strip().str.lower()
+                data_cfg.setdefault("positive_label", "yes")
+                data_cfg.setdefault("negative_label", "no")
+                log_info(
+                    "【数据加载】医院再入院数据集已读取，未做额外过滤，",
+                    f"样本数={len(df)}"
+                )
+            elif dataset_name_lower == "diabetic":
+                df = _load_csv_like(raw_path, data_cfg)
+                target_col = data_cfg.get("target_col", "readmitted")
+                if target_col not in df.columns:
+                    raise KeyError(f"糖尿病再入院数据集中未找到标签列 {target_col}")
+                y_raw = df[target_col].astype(str).str.strip().str.lower()
+                mapping = {"<30": 1, ">30": 0, "no": 0}
+                df[target_col] = y_raw.map(mapping)
+                if df[target_col].isna().any():
+                    raise ValueError("糖尿病数据集 readmitted 列存在无法识别的取值（非 <30/>30/NO）")
+                df[target_col] = df[target_col].astype(int)
+                data_cfg["positive_label"] = 1
+                data_cfg.setdefault("negative_label", 0)
+                log_info(
+                    "【数据加载】糖尿病数据集已读取，标签已二值化，",
+                    f"样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
+                )
             else:
                 df = _load_csv_like(raw_path, data_cfg)
         elif file_type == "tsv":

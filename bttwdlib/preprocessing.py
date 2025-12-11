@@ -1,9 +1,10 @@
 import numpy as np
 import pandas as pd
 from scipy import sparse
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, MinMaxScaler
 from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, StandardScaler
 from .utils_logging import log_info
 
 
@@ -81,13 +82,27 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
     X_raw = df.drop(columns=list(drop_cols), errors="ignore")
 
     transformers = []
+    impute_cfg = prep_cfg.get("impute_strategy", {}) or {}
+    cat_strategy = impute_cfg.get("categorical")
+    num_strategy = impute_cfg.get("continuous")
+
     if categorical_cols:
-        encoder = OneHotEncoder(drop="first" if prep_cfg.get("drop_first") else None, handle_unknown="ignore")
-        transformers.append(("cat", encoder, categorical_cols))
+        cat_steps = []
+        if cat_strategy:
+            cat_steps.append(("imputer", SimpleImputer(strategy=cat_strategy)))
+        encoder = OneHotEncoder(
+            drop="first" if prep_cfg.get("drop_first") else None, handle_unknown="ignore"
+        )
+        cat_steps.append(("encoder", encoder))
+        transformers.append(("cat", Pipeline(cat_steps), categorical_cols))
     if continuous_cols:
+        num_steps = []
+        if num_strategy:
+            num_steps.append(("imputer", SimpleImputer(strategy=num_strategy)))
         scaler_type = prep_cfg.get("scaler_type", "standard")
         scaler = StandardScaler() if scaler_type == "standard" else MinMaxScaler()
-        transformers.append(("num", scaler, continuous_cols))
+        num_steps.append(("scaler", scaler))
+        transformers.append(("num", Pipeline(num_steps), continuous_cols))
 
     preprocessor = ColumnTransformer(transformers=transformers, remainder="drop")
     pipeline = Pipeline(steps=[("preprocess", preprocessor)])
