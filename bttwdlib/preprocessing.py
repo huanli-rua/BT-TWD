@@ -32,6 +32,22 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
     # 缺失值统一处理
     if prep_cfg.get("handle_missing") == "question_mark":
         df.replace("?", np.nan, inplace=True)
+    elif prep_cfg.get("handle_missing") == "simple":
+        strategy = prep_cfg.get("fillna_strategy", "most_frequent")
+        if strategy == "most_frequent":
+            fill_values = df.mode().iloc[0]
+            df.fillna(fill_values, inplace=True)
+        elif strategy == "median":
+            numeric_median = df.median(numeric_only=True)
+            df.fillna(numeric_median, inplace=True)
+        elif strategy == "mean":
+            numeric_mean = df.mean(numeric_only=True)
+            df.fillna(numeric_mean, inplace=True)
+        elif strategy == "zero":
+            df.fillna(0, inplace=True)
+        elif strategy == "drop":
+            df.dropna(inplace=True)
+        log_info(f"【预处理】缺失值填充策略={strategy}")
 
     # 推断列
     continuous_cols = (
