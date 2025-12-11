@@ -1,0 +1,190 @@
+DATA:
+  dataset_name: "telco_churn"
+  raw_path: "../data/Telco-Customer-Churn.csv"
+  target_col: "Churn"
+  positive_label: "Yes"
+  file_type: "csv"
+  use_kfold: true
+  n_splits: 5
+  shuffle: true
+  stratify: true
+  random_state: 42
+
+PREPROCESS:
+  continuous_cols:
+    - "tenure"
+    - "MonthlyCharges"
+    - "TotalCharges"
+  categorical_cols:
+    - "gender"
+    - "SeniorCitizen"
+    - "Partner"
+    - "Dependents"
+    - "PhoneService"
+    - "MultipleLines"
+    - "InternetService"
+    - "OnlineSecurity"
+    - "OnlineBackup"
+    - "DeviceProtection"
+    - "TechSupport"
+    - "StreamingTV"
+    - "StreamingMovies"
+    - "Contract"
+    - "PaperlessBilling"
+    - "PaymentMethod"
+  handle_missing: "none"
+  fillna_strategy: "most_frequent"
+  scale_continuous: true
+  scaler_type: "standard"
+  encoding_type: "onehot"
+  drop_first: true
+  save_feature_names: true
+
+SCORE:
+  bucket_score_mode: "f1_regret_bnd"
+  f1_weight: 1.0
+  regret_weight: 1.0
+  bnd_weight: 0.5
+
+BTTWD:
+  bucket_levels:
+    - level: 1
+      name: "L1_Contract"
+      type: "categorical_group"
+      col: "Contract"
+      groups:
+        "month_to_month": ["Month-to-month"]
+        "one_year": ["One year"]
+        "two_year": ["Two year"]
+      others: "others"
+
+    - level: 2
+      name: "L2_tenure"
+      type: "numeric_bin"
+      col: "tenure"
+      bins: [12, 24, 60]
+      labels: ["new", "short_term", "mid_term", "long_term"]
+
+    - level: 3
+      name: "L3_InternetService"
+      type: "categorical_group"
+      col: "InternetService"
+      groups:
+        "dsl": ["DSL"]
+        "fiber": ["Fiber optic"]
+      others: "no_internet"
+
+  min_bucket_size: 60
+  max_levels: 3
+  use_gain: true
+  min_gain_for_split: 0.0
+  gamma_bucket: 0.000
+  bucket_subsample: 0.7
+  max_train_samples_per_bucket: 20000
+  parent_share_rate: 0.2
+  min_parent_share: 50
+  val_ratio: 0.3
+  min_val_samples_per_bucket: 25
+  use_global_backoff: true
+  global_estimator: "xgb"
+  bucket_estimator: "none"
+  posterior_estimator: "logreg"
+  logreg_C: 1.0
+  knn_k: 6
+  bucket_rf:
+    n_estimators: 200
+    max_depth: null
+    random_state: 42
+    n_jobs: -1
+  bucket_xgb:
+    n_estimators: 200
+    max_depth: 3
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+  global_xgb:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+
+THRESHOLDS:
+  thresholds_mode: "bucket_wise"
+  objective: "regret"
+  alpha_grid: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  beta_grid:  [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+  gap_min: 0.1
+  costs:
+    C_TP: 0.0
+    C_TN: 0.0
+    C_FP: 1.0
+    C_FN: 5.0
+    C_BP: 1.0
+    C_BN: 0.5
+  min_samples_for_thresholds: 60
+
+BASELINES:
+  use_logreg: true
+  use_random_forest: true
+  use_knn: true
+  use_xgboost: true
+
+  common:
+    threshold_mode: "fixed"
+    fixed_threshold: 0.4
+  logreg:
+    C: 1.0
+    max_iter: 500
+    use_custom_threshold: true
+    custom_threshold: 0.4
+  random_forest:
+    n_estimators: 200
+    max_depth: null
+    random_state: 42
+    use_custom_threshold: true
+    custom_threshold: 0.4
+
+  knn:
+    n_neighbors: 6
+    use_custom_threshold: true
+    custom_threshold: 0.4
+
+  xgboost:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+    use_custom_threshold: true
+    custom_threshold: 0.4
+
+EXP:
+  kfold_repeats: 1
+  n_jobs: -1
+  verbose: 1
+
+METRICS:
+  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret"]
+  pos_label: 1
+
+OUTPUT:
+  results_dir: "results/telco_churn"
+  figs_dir: "figs"
+  save_per_fold_metrics: true
+  save_bucket_metrics: true
+  save_config_copy: true
+  save_threshold_logs: true
+  threshold_log_filename: "bucket_thresholds_per_fold.csv"
+
+SEED:
+  global_seed: 42
