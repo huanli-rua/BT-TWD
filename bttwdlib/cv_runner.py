@@ -167,7 +167,7 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None, bucket_tree: 
     y_score = model.predict_proba(X_test, bucket_test)
     y_pred_s3 = model.predict(X_test, bucket_test)
 
-    costs = cfg.get("THRESHOLDS", {}).get("costs", {})
+    costs = (cfg.get("THRESHOLD") or cfg.get("THRESHOLDS", {})).get("costs", {})
     y_pred_binary = predict_binary_by_cost(y_score, costs) if costs else np.where(y_pred_s3 == 1, 1, 0)
 
     metrics_s3 = compute_s3_metrics(y_test, y_pred_s3, y_score, cfg.get("METRICS", {}), costs=costs)
@@ -203,7 +203,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
     per_fold_records = []
     bucket_metrics_records = []
     threshold_log_records = []
-    threshold_costs = cfg.get("THRESHOLDS", {}).get("costs", {})
+    threshold_costs = (cfg.get("THRESHOLD") or cfg.get("THRESHOLDS", {})).get("costs", {})
 
     # 运行基线整体（使用 cross_val_predict）
     baseline_results = {}

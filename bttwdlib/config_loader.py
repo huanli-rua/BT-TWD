@@ -23,8 +23,10 @@ def show_cfg(cfg: dict) -> None:
         f"【配置-数据】数据集={data_cfg.get('dataset_name')}, k折={data_cfg.get('n_splits')}, 目标列={data_cfg.get('target_col')}, 正类=\"{data_cfg.get('positive_label')}\""
     )
     bttwd_cfg = cfg.get("BTTWD", {})
+    threshold_cfg = cfg.get("THRESHOLD") or cfg.get("THRESHOLDS", {})
+    threshold_mode = threshold_cfg.get("mode", bttwd_cfg.get("thresholds_mode"))
     log_info(
-        f"【配置-BTTWD】阈值模式={bttwd_cfg.get('thresholds_mode')}, 全局模型={bttwd_cfg.get('global_estimator')}, "
+        f"【配置-BTTWD】阈值模式={threshold_mode}, 全局模型={bttwd_cfg.get('global_estimator')}, "
         f"桶内模型={bttwd_cfg.get('bucket_estimator')}, 后验估计器(兼容字段)={bttwd_cfg.get('posterior_estimator')}"
     )
     baseline_cfg = cfg.get("BASELINES", {})

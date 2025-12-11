@@ -41,7 +41,7 @@ def run_baseline_bucket_evaluation(
 ):
     bttwd_cfg = cfg.get("BTTWD", {})
     data_cfg = cfg.get("DATA", {})
-    threshold_cfg = cfg.get("THRESHOLDS", {})
+    threshold_cfg = cfg.get("THRESHOLD") or cfg.get("THRESHOLDS", {})
     cost_cfg = threshold_cfg.get("costs", {})
 
     xgb_cfg = bttwd_cfg.get("global_xgb", {})

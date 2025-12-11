@@ -21,12 +21,26 @@ class BucketTree:
                     f"numeric_bin labels length {len(labels)} does not match interval count {n_intervals}"
                 )
             return pd.cut(series, bins=cut_bins, labels=labels, include_lowest=True)
-        if level_type == "categorical_group":
-            other_label = level_cfg.get("other_label", "OTHER")
+        if level_type in {"categorical_group", "category_group"}:
+            other_label = (
+                level_cfg.get("other_label")
+                or level_cfg.get("default_group")
+                or level_cfg.get("others")
+                or "OTHER"
+            )
             groups = level_cfg.get("groups")
             if groups:
                 mapping = {}
-                for group_name, values in groups.items():
+                if isinstance(groups, dict):
+                    group_items = groups.items()
+                else:
+                    group_items = []
+                    for group_cfg in groups:
+                        label = group_cfg.get("label")
+                        values = group_cfg.get("values", [])
+                        if label is not None:
+                            group_items.append((label, values))
+                for group_name, values in group_items:
                     for v in values:
                         mapping[v] = group_name
                 return series.map(mapping).fillna(other_label)
