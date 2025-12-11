@@ -1,0 +1,191 @@
+DATA:
+  dataset_name: "airbnb_nyc"
+  raw_path: "../data/AB_NYC_2019.csv"
+  target_col: "price"          # 先指定原始价格列
+  positive_label: 1            # 目标是把新标签映射成 0/1，1 为正类
+  file_type: "csv"
+  use_kfold: true
+  n_splits: 5
+  shuffle: true
+  stratify: true
+  random_state: 42
+
+  target_transform:
+    type: "threshold_binary"
+    threshold: 255             # 固定阈值 255
+    greater_is_positive: true  # price >= 255 为正类
+    new_col: "high_price"      # 新生成的标签列名
+    force: true                # 无论原始是否是 0/1，强制执行变换
+
+PREPROCESS:
+  continuous_cols:
+    - "latitude"
+    - "longitude"
+    - "minimum_nights"
+    - "number_of_reviews"
+    - "reviews_per_month"
+    - "calculated_host_listings_count"
+    - "availability_365"
+  categorical_cols:
+    - "neighbourhood_group"
+    - "neighbourhood"
+    - "room_type"
+  handle_missing: "none"
+  fillna_strategy: "most_frequent"
+  scale_continuous: true
+  scaler_type: "standard"
+  encoding_type: "onehot"
+  drop_first: true
+  save_feature_names: true
+
+SCORE:
+  bucket_score_mode: "f1_regret_bnd"
+  f1_weight: 1.0
+  regret_weight: 1.0
+  bnd_weight: 0.5
+
+BTTWD:
+  bucket_levels:
+    - level: 1
+      name: "L1_neighbourhood_group"
+      type: "categorical_group"
+      col: "neighbourhood_group"
+      groups:
+        "manhattan": ["Manhattan"]
+        "brooklyn": ["Brooklyn"]
+        "queens": ["Queens"]
+        "bronx": ["Bronx"]
+        "staten_island": ["Staten Island"]
+      others: "others"
+
+    - level: 2
+      name: "L2_room_type"
+      type: "categorical_group"
+      col: "room_type"
+      groups:
+        "entire_home": ["Entire home/apt"]
+        "private_room": ["Private room"]
+        "shared_room": ["Shared room"]
+      others: "others"
+
+    - level: 3
+      name: "L3_availability"
+      type: "numeric_bin"
+      col: "availability_365"
+      bins: [30, 180, 365]
+      labels: ["rare", "mid_term", "long_term", "always_available"]
+
+  min_bucket_size: 200
+  max_levels: 3
+  use_gain: true
+  min_gain_for_split: 0.0
+  gamma_bucket: 0.000
+  bucket_subsample: 0.7
+  max_train_samples_per_bucket: 20000
+  parent_share_rate: 0.2
+  min_parent_share: 50
+  val_ratio: 0.3
+  min_val_samples_per_bucket: 60
+  use_global_backoff: true
+  global_estimator: "xgb"
+  bucket_estimator: "none"
+  posterior_estimator: "logreg"
+  logreg_C: 1.0
+  knn_k: 6
+  bucket_rf:
+    n_estimators: 200
+    max_depth: null
+    random_state: 42
+    n_jobs: -1
+  bucket_xgb:
+    n_estimators: 200
+    max_depth: 3
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+  global_xgb:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+
+THRESHOLDS:
+  thresholds_mode: "bucket_wise"
+  objective: "regret"
+  alpha_grid: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  beta_grid:  [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+  gap_min: 0.1
+  costs:
+    C_TP: 0.0
+    C_TN: 0.0
+    C_FP: 1.0
+    C_FN: 1.0
+    C_BP: 0.5
+    C_BN: 0.5
+  min_samples_for_thresholds: 150
+
+BASELINES:
+  use_logreg: true
+  use_random_forest: true
+  use_knn: true
+  use_xgboost: true
+
+  common:
+    threshold_mode: "fixed"
+    fixed_threshold: 0.4
+  logreg:
+    C: 1.0
+    max_iter: 500
+    use_custom_threshold: true
+    custom_threshold: 0.4
+  random_forest:
+    n_estimators: 200
+    max_depth: null
+    random_state: 42
+    use_custom_threshold: true
+    custom_threshold: 0.4
+
+  knn:
+    n_neighbors: 6
+    use_custom_threshold: true
+    custom_threshold: 0.4
+
+  xgboost:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+    use_custom_threshold: true
+    custom_threshold: 0.4
+
+EXP:
+  kfold_repeats: 1
+  n_jobs: -1
+  verbose: 1
+
+METRICS:
+  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret"]
+  pos_label: 1
+
+OUTPUT:
+  results_dir: "results/airbnb_nyc"
+  figs_dir: "figs"
+  save_per_fold_metrics: true
+  save_bucket_metrics: true
+  save_config_copy: true
+  save_threshold_logs: true
+  threshold_log_filename: "bucket_thresholds_per_fold.csv"
+
+SEED:
+  global_seed: 42

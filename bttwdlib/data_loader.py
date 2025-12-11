@@ -227,6 +227,9 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
         else:
             raise ValueError(f"未知的 file_type={file_type}")
 
+    if dataset_name == "telco_churn" and "TotalCharges" in df.columns:
+        df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
+
     df, target_col = _apply_target_transform(df, data_cfg)
 
     feature_cols = data_cfg.get("feature_cols")
