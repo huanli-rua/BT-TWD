@@ -1,0 +1,191 @@
+DATA:
+  dataset_name: "online_shoppers"
+  raw_path: "../data/online_shoppers_intention.csv"
+  target_col: "Revenue"
+  positive_label: True
+  file_type: "csv"
+  use_kfold: true
+  n_splits: 5
+  shuffle: true
+  stratify: true
+  random_state: 42
+
+PREPROCESS:
+  continuous_cols:
+    - "Administrative"
+    - "Administrative_Duration"
+    - "Informational"
+    - "Informational_Duration"
+    - "ProductRelated"
+    - "ProductRelated_Duration"
+    - "BounceRates"
+    - "ExitRates"
+    - "PageValues"
+    - "SpecialDay"
+  categorical_cols:
+    - "Month"
+    - "OperatingSystems"
+    - "Browser"
+    - "Region"
+    - "TrafficType"
+    - "VisitorType"
+    - "Weekend"
+  handle_missing: "none"
+  fillna_strategy: "most_frequent"
+  scale_continuous: true
+  scaler_type: "standard"
+  encoding_type: "onehot"
+  drop_first: true
+  save_feature_names: true
+
+SCORE:
+  bucket_score_mode: "f1_regret_bnd"
+  f1_weight: 1.0
+  regret_weight: 1.0
+  bnd_weight: 0.5
+
+BTTWD:
+  bucket_levels:
+    - level: 1
+      name: "L1_VisitorType"
+      type: "categorical_group"
+      col: "VisitorType"
+      groups:
+        "returning": ["Returning_Visitor"]
+        "new": ["New_Visitor"]
+      others: "others"
+
+    - level: 2
+      name: "L2_Month"
+      type: "categorical_group"
+      col: "Month"
+      groups:
+        "high_season": ["Nov", "Dec"]
+        "mid_season":  ["May", "Jun", "Jul", "Aug"]
+        "low_season":  ["Jan", "Feb", "Mar", "Apr", "Sep", "Oct"]
+      others: "others"
+
+    - level: 3
+      name: "L3_Region"
+      type: "categorical_group"
+      col: "Region"
+      groups:
+        "region_1_2": [1, 2]
+        "region_3_4": [3, 4]
+        "region_5_plus": [5, 6, 7, 8, 9]
+      others: "others"
+
+  min_bucket_size: 80
+  max_levels: 3
+  use_gain: true
+  min_gain_for_split: 0.0
+  gamma_bucket: 0.000
+  bucket_subsample: 0.7
+  max_train_samples_per_bucket: 20000
+  parent_share_rate: 0.2
+  min_parent_share: 50
+  val_ratio: 0.3
+  min_val_samples_per_bucket: 40
+  use_global_backoff: true
+  global_estimator: "xgb"
+  bucket_estimator: "none"
+  posterior_estimator: "logreg"
+  logreg_C: 1.0
+  knn_k: 6
+  bucket_rf:
+    n_estimators: 200
+    max_depth: null
+    random_state: 42
+    n_jobs: -1
+  bucket_xgb:
+    n_estimators: 200
+    max_depth: 3
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+  global_xgb:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+
+THRESHOLDS:
+  thresholds_mode: "bucket_wise"
+  objective: "regret"
+  alpha_grid: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  beta_grid:  [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+  gap_min: 0.1
+  costs:
+    C_TP: 0.0
+    C_TN: 0.0
+    C_FP: 1.0
+    C_FN: 2.0
+    C_BP: 0.75
+    C_BN: 0.5
+  min_samples_for_thresholds: 80
+
+BASELINES:
+  use_logreg: true
+  use_random_forest: true
+  use_knn: true
+  use_xgboost: true
+
+  common:
+    threshold_mode: "fixed"
+    fixed_threshold: 0.4
+  logreg:
+    C: 1.0
+    max_iter: 500
+    use_custom_threshold: true
+    custom_threshold: 0.4
+  random_forest:
+    n_estimators: 200
+    max_depth: null
+    random_state: 42
+    use_custom_threshold: true
+    custom_threshold: 0.4
+
+  knn:
+    n_neighbors: 6
+    use_custom_threshold: true
+    custom_threshold: 0.4
+
+  xgboost:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+    use_custom_threshold: true
+    custom_threshold: 0.4
+
+EXP:
+  kfold_repeats: 1
+  n_jobs: -1
+  verbose: 1
+
+METRICS:
+  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret"]
+  pos_label: 1
+
+OUTPUT:
+  results_dir: "results/online_shoppers"
+  figs_dir: "figs"
+  save_per_fold_metrics: true
+  save_bucket_metrics: true
+  save_config_copy: true
+  save_threshold_logs: true
+  threshold_log_filename: "bucket_thresholds_per_fold.csv"
+
+SEED:
+  global_seed: 42
