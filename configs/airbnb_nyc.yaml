@@ -1,6 +1,6 @@
 DATA:
   dataset_name: "airbnb_nyc"
-  raw_path: "../data/AB_NYC_2019.csv"
+  raw_path: "../data/AB_NYC/AB_NYC_2019.csv"
   target_col: "price"          # 先指定原始价格列
   positive_label: 1            # 目标是把新标签映射成 0/1，1 为正类
   file_type: "csv"
@@ -132,7 +132,7 @@ THRESHOLDS:
   min_samples_for_thresholds: 150
 
 BASELINES:
-  use_logreg: true
+  use_logreg: false
   use_random_forest: true
   use_knn: true
   use_xgboost: true

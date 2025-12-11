@@ -1,6 +1,6 @@
 DATA:
   dataset_name: "telco_churn"
-  raw_path: "../data/Telco-Customer-Churn.csv"
+  raw_path: "../data/Telco-Customer-Churn/Telco-Customer-Churn.csv"
   target_col: "Churn"
   positive_label: "Yes"
   file_type: "csv"

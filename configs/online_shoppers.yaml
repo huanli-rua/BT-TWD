@@ -1,6 +1,6 @@
 DATA:
   dataset_name: "online_shoppers"
-  raw_path: "../data/online_shoppers_intention.csv"
+  raw_path: "../data/shopper/online_shoppers_intention.csv"
   target_col: "Revenue"
   positive_label: True
   file_type: "csv"
@@ -132,9 +132,9 @@ THRESHOLDS:
   min_samples_for_thresholds: 80
 
 BASELINES:
-  use_logreg: true
-  use_random_forest: true
-  use_knn: true
+  use_logreg: false
+  use_random_forest: false
+  use_knn: false
   use_xgboost: true
 
   common:
