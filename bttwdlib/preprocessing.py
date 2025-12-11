@@ -1,10 +1,37 @@
 import numpy as np
 import pandas as pd
 from scipy import sparse
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, MinMaxScaler
 from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, StandardScaler
 from .utils_logging import log_info
+
+
+def _apply_missing_handling(df: pd.DataFrame, prep_cfg: dict) -> pd.DataFrame:
+    """Apply lightweight missing-value preprocessing that must happen before fitting/transforming."""
+
+    df = df.copy()
+    handle_missing = prep_cfg.get("handle_missing")
+    if handle_missing == "question_mark":
+        df.replace("?", np.nan, inplace=True)
+
+    if handle_missing == "simple" and prep_cfg.get("fillna_strategy", "most_frequent") == "drop":
+        df = df.dropna().reset_index(drop=True)
+
+    return df
+
+
+def _build_simple_imputer(strategy: str, feature_type: str):
+    if strategy == "most_frequent":
+        return SimpleImputer(strategy="most_frequent")
+    if strategy == "median" and feature_type == "numeric":
+        return SimpleImputer(strategy="median")
+    if strategy == "mean" and feature_type == "numeric":
+        return SimpleImputer(strategy="mean")
+    if strategy == "zero":
+        return SimpleImputer(strategy="constant", fill_value=0)
+    return None
 
 
 def _infer_columns(df: pd.DataFrame, target_col: str):
@@ -28,25 +55,11 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
     positive_label = data_cfg.get("positive_label", ">50K")
     negative_label = data_cfg.get("negative_label")
 
-    df = df.copy()
-    # 缺失值统一处理
-    if prep_cfg.get("handle_missing") == "question_mark":
-        df.replace("?", np.nan, inplace=True)
-    elif prep_cfg.get("handle_missing") == "simple":
+    df = _apply_missing_handling(df, prep_cfg)
+    handle_missing = prep_cfg.get("handle_missing")
+    strategy = None
+    if handle_missing == "simple":
         strategy = prep_cfg.get("fillna_strategy", "most_frequent")
-        if strategy == "most_frequent":
-            fill_values = df.mode().iloc[0]
-            df.fillna(fill_values, inplace=True)
-        elif strategy == "median":
-            numeric_median = df.median(numeric_only=True)
-            df.fillna(numeric_median, inplace=True)
-        elif strategy == "mean":
-            numeric_mean = df.mean(numeric_only=True)
-            df.fillna(numeric_mean, inplace=True)
-        elif strategy == "zero":
-            df.fillna(0, inplace=True)
-        elif strategy == "drop":
-            df.dropna(inplace=True)
         log_info(f"【预处理】缺失值填充策略={strategy}")
 
     # 推断列
@@ -81,13 +94,28 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
     X_raw = df.drop(columns=list(drop_cols), errors="ignore")
 
     transformers = []
+    cat_imputer = None
+    num_imputer = None
+    if handle_missing == "simple" and strategy != "drop":
+        cat_imputer = _build_simple_imputer(strategy, "categorical") if categorical_cols else None
+        num_imputer = _build_simple_imputer(strategy, "numeric") if continuous_cols else None
     if categorical_cols:
         encoder = OneHotEncoder(drop="first" if prep_cfg.get("drop_first") else None, handle_unknown="ignore")
-        transformers.append(("cat", encoder, categorical_cols))
+        cat_steps = []
+        if cat_imputer is not None:
+            cat_steps.append(("imputer", cat_imputer))
+        cat_steps.append(("encoder", encoder))
+        cat_pipeline = Pipeline(steps=cat_steps)
+        transformers.append(("cat", cat_pipeline, categorical_cols))
     if continuous_cols:
         scaler_type = prep_cfg.get("scaler_type", "standard")
         scaler = StandardScaler() if scaler_type == "standard" else MinMaxScaler()
-        transformers.append(("num", scaler, continuous_cols))
+        num_steps = []
+        if num_imputer is not None:
+            num_steps.append(("imputer", num_imputer))
+        num_steps.append(("scaler", scaler))
+        num_pipeline = Pipeline(steps=num_steps)
+        transformers.append(("num", num_pipeline, continuous_cols))
 
     preprocessor = ColumnTransformer(transformers=transformers, remainder="drop")
     pipeline = Pipeline(steps=[("preprocess", preprocessor)])
