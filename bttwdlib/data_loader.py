@@ -210,13 +210,29 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
                 target_col = data_cfg.get("target_col", "readmitted")
                 if target_col not in df.columns:
                     raise KeyError(f"医院再入院数据集中未找到标签列 {target_col}")
-                df[target_col] = df[target_col].astype(str).str.strip().str.lower()
-                data_cfg.setdefault("positive_label", "yes")
-                data_cfg.setdefault("negative_label", "no")
+
+                # 统一小写
+                y_raw = df[target_col].astype(str).str.strip().str.lower()
+
+                # 映射为 0/1（和 diabetic 保持一致）
+                mapping = {"yes": 1, "no": 0}
+                df[target_col] = y_raw.map(mapping)
+
+                if df[target_col].isna().any():
+                    raise ValueError("医院再入院数据集 readmitted 列存在无法识别的取值（非 yes/no）")
+
+                df[target_col] = df[target_col].astype(int)
+
+                # 同步标签定义
+                data_cfg["positive_label"] = 1
+                data_cfg.setdefault("negative_label", 0)
+
                 log_info(
-                    "【数据加载】医院再入院数据集已读取，未做额外过滤，",
-                    f"样本数={len(df)}"
+                    f"【数据加载】医院再入院数据集已读取，标签已二值化，样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
                 )
+
+
+
             elif dataset_name_lower == "diabetic":
                 df = _load_csv_like(raw_path, data_cfg)
                 target_col = data_cfg.get("target_col", "readmitted")
@@ -231,9 +247,9 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
                 data_cfg["positive_label"] = 1
                 data_cfg.setdefault("negative_label", 0)
                 log_info(
-                    "【数据加载】糖尿病数据集已读取，标签已二值化，",
-                    f"样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
+                    f"【数据加载】糖尿病数据集已读取，标签已二值化，样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
                 )
+
             else:
                 df = _load_csv_like(raw_path, data_cfg)
         elif file_type == "tsv":

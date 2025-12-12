@@ -19,7 +19,8 @@ PREPROCESS:
     - "number_outpatient"
     - "number_emergency"
     - "number_inpatient"
-    - "num_diagnoses"
+    - "number_diagnoses"
+
 
   categorical_cols:
     - "race"
