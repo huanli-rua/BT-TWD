@@ -1,6 +1,6 @@
 DATA:
   dataset_name: "hospital_readmissions"
-  raw_path: "../data/hospital/hospital_readmissions.csv"
+  raw_path: "data/hospital/hospital_readmissions.csv"
   target_col: "readmitted"
   positive_label: "yes"
   file_type: "csv"
