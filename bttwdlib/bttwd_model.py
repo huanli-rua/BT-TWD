@@ -48,7 +48,21 @@ class BTTWDModel:
         self.max_train_samples_per_bucket = bcfg.get("max_train_samples_per_bucket")
         self.stop_split_on_other: bool = bcfg.get("stop_split_on_other", True)
         self.stop_split_labels: set[str] = set(
-            str(v) for v in bcfg.get("stop_split_labels", ["OTHER", "Others", "others", "other", "OtherType"])
+            str(v)
+            for v in bcfg.get(
+                "stop_split_labels",
+                [
+                    "OTHER",
+                    "Others",
+                    "others",
+                    "other",
+                    "OtherType",
+                    "OTHER_CARRIER",
+                    "OTHER_ORIGIN",
+                    "OTHER_DEST",
+                    "no_internet",
+                ],
+            )
         )
         self.optimize_thresholds = True
         self.threshold_mode = thresh_cfg.get("mode", bcfg.get("thresholds_mode", "bucket_wise"))
