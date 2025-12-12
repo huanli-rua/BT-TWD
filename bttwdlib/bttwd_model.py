@@ -46,6 +46,10 @@ class BTTWDModel:
         self.use_global_backoff = bcfg.get("use_global_backoff", True)
         self.bucket_subsample = bcfg.get("bucket_subsample", 1.0)
         self.max_train_samples_per_bucket = bcfg.get("max_train_samples_per_bucket")
+        self.stop_split_on_other: bool = bcfg.get("stop_split_on_other", True)
+        self.stop_split_labels: set[str] = set(
+            str(v) for v in bcfg.get("stop_split_labels", ["OTHER", "Others", "others", "other", "OtherType"])
+        )
         self.optimize_thresholds = True
         self.threshold_mode = thresh_cfg.get("mode", bcfg.get("thresholds_mode", "bucket_wise"))
         self.threshold_objective = thresh_cfg.get("objective", "regret")
@@ -455,6 +459,13 @@ class BTTWDModel:
                 continue
 
             part_series = bucket_parts[level]
+
+            if self.stop_split_on_other and any(tok in str(bucket_id) for tok in self.stop_split_labels):
+                leaf_index_map[bucket_id] = idx_all
+                log_bt(
+                    f"桶 bucket_id={bucket_id} 命中 stop_split_labels={sorted(self.stop_split_labels)}，不再细分"
+                )
+                continue
             values = part_series.iloc[idx_all]
             groups = {cid: idxs.to_numpy() for cid, idxs in values.groupby(values).groups.items()}
             large_values = []
