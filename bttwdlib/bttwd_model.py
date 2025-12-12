@@ -474,12 +474,16 @@ class BTTWDModel:
 
             part_series = bucket_parts[level]
 
-            if self.stop_split_on_other and any(tok in str(bucket_id) for tok in self.stop_split_labels):
-                leaf_index_map[bucket_id] = idx_all
-                log_bt(
-                    f"桶 bucket_id={bucket_id} 命中 stop_split_labels={sorted(self.stop_split_labels)}，不再细分"
-                )
-                continue
+            if self.stop_split_on_other:
+                last_part = str(bucket_id).split("|")[-1]
+                bucket_value = last_part.split("=", 1)[1] if "=" in last_part else last_part
+
+                if bucket_value in self.stop_split_labels:
+                    leaf_index_map[bucket_id] = idx_all
+                    log_bt(
+                        f"桶 bucket_id={bucket_id} 命中 stop_split_labels={sorted(self.stop_split_labels)}，不再细分"
+                    )
+                    continue
             values = part_series.iloc[idx_all]
             groups = {cid: idxs.to_numpy() for cid, idxs in values.groupby(values).groups.items()}
             large_values = []
