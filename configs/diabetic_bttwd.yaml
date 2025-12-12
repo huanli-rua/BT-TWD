@@ -1,6 +1,6 @@
 DATA:
   dataset_name: "diabetic"
-  raw_path: "../data/diabetic/diabetic_data.csv"
+  raw_path: "data/diabetes/diabetic_data.csv"
   target_col: "readmitted"
   positive_label: "<30"
   file_type: "csv"
@@ -19,7 +19,7 @@ PREPROCESS:
     - "number_outpatient"
     - "number_emergency"
     - "number_inpatient"
-    - "num_diagnoses"
+    - "number_diagnoses"
 
   categorical_cols:
     - "race"
