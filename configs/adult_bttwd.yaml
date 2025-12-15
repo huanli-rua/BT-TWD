@@ -112,8 +112,8 @@ BTTWD:
 THRESHOLDS:
   thresholds_mode: "bucket_wise"   # 阈值模式，目前只支持 bucket_wise；字段名要和代码中的 thresholds_mode 对应
   objective: "regret"              # 桶阈值搜索以 regret 为优化目标，F1/BND 会记录但不用于分桶结构或分裂决策
-  alpha_grid: [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]   # α 候选，grid 是全局统一的候选网格，桶级只在这个网格上做搜索
-  beta_grid:  [0.0,0.1,0.2,0.3,0.4,0.5]    # β 候选
+  alpha_grid: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  beta_grid:  [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]    # β 候选
   gap_min: 0.1
   costs:
     C_TP: 0.0                              # 真正类成本

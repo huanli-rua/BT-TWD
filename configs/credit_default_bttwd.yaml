@@ -2,18 +2,26 @@ DATA:
   dataset_name: "credit_default"
   raw_path: "../data/credit/default of credit card clients.xls"
   file_type: "xls"
+  sheet_name: 0
   target_col: "default payment next month"
   positive_label: 1
   negative_label: 0
-  use_kfold: false
-  split:
-    val_ratio: 0.1
-    test_ratio: 0.2
+
+  # ✅ 对齐 adult：使用 K 折，而不是 holdout
+  use_kfold: true
+  kfold:
+    n_splits: 5
+    shuffle: true
     random_state: 42
 
 PREPROCESS:
   handle_missing: "simple"
   fillna_strategy: "median"
+
+  drop_cols:
+    - "ID"
+
+  # ✅ 这些列用于“模型训练/后验估计”
   continuous_cols:
     - "LIMIT_BAL"
     - "AGE"
@@ -29,15 +37,18 @@ PREPROCESS:
     - "PAY_AMT4"
     - "PAY_AMT5"
     - "PAY_AMT6"
+
   categorical_cols:
     - "SEX"
     - "EDUCATION"
     - "MARRIAGE"
+    # ✅ 派生分桶特征（也允许进入模型；如以后想“结构/预测分离”，可从这里删掉）
     - "ever_delay"
     - "max_delay_bin"
-  drop_cols:
-    - "ID"
+
   scaler_type: "standard"
+
+  # ✅ 信用卡违约：派生特征开关（在 preprocessing 里实现）
   feature_engineering:
     enable_credit_default_derived: true
     pay_status_cols: ["PAY_0", "PAY_2", "PAY_3", "PAY_4", "PAY_5", "PAY_6"]
@@ -54,6 +65,7 @@ SCORE:
   bnd_weight: 0.5
 
 BTTWD:
+  # ✅ 三层桶（最稳版本）
   bucket_levels:
     - level: 1
       name: "L1_ever_delay"
@@ -71,7 +83,7 @@ BTTWD:
         mild: ["1-2"]
         medium: ["3-4"]
         severe: ["5+"]
-      default_group: "OTHER"
+      other_label: "unknown"
 
     - level: 3
       name: "L3_limit_bal"
@@ -79,44 +91,56 @@ BTTWD:
       col: "LIMIT_BAL"
       bins: [80000, 200000]
       labels: ["low_limit", "mid_limit", "high_limit"]
+
+  # ✅ 对齐成人/银行那套：桶参数
   min_bucket_size: 200
   max_levels: 3
+
   use_gain: true
   min_gain_for_split: 0.0
   gamma_bucket: 0.0
   bucket_subsample: 1.0
+
   max_train_samples_per_bucket: 50000
   val_ratio: 0.2
   min_val_samples_per_bucket: 50
+
   use_global_backoff: true
-  global_estimator: "logreg"
-  bucket_estimator: "none"
+
+  # 你现在 credit_default 先用 logreg 跑通（后面也可以换 xgb）
+  global_estimator: "xgb"
   posterior_estimator: "logreg"
+  bucket_estimator: "none"
   logreg_C: 1.0
 
-THRESHOLDS:
-  thresholds_mode: "bucket_wise"
+THRESHOLD:
+  mode: "bucket_wise"
   objective: "regret"
-  alpha_grid: [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-  beta_grid: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+  alpha_grid: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  beta_grid:  [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
   gap_min: 0.1
+
   costs:
     C_TP: 0.0
     C_TN: 0.0
-    C_FP: 0.75
-    C_FN: 1.5
-    C_BP: 0.75
-    C_BN: 0.25
+    C_FP: 1.0
+    C_FN: 3.0
+    C_BP: 1.0
+    C_BN: 0.5
+
   min_samples_for_thresholds: 100
 
 BASELINES:
+  # ✅ 对齐 adult：基线开关
   use_logreg: true
   use_random_forest: false
   use_knn: false
   use_xgboost: false
+
   common:
     threshold_mode: "fixed"
     fixed_threshold: 0.4
+
   logreg:
     C: 1.0
     max_iter: 300
@@ -124,17 +148,20 @@ BASELINES:
     custom_threshold: 0.4
 
 EXP:
+  # ✅ 对齐 adult：K 折重复次数（通常=1；n_splits=5 就够）
   kfold_repeats: 1
   n_jobs: -1
   verbose: 1
 
 METRICS:
-  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret"]
+  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret", "BND_ratio", "POS_coverage"]
   pos_label: 1
 
 OUTPUT:
   results_dir: "results/credit_default_bttwd"
   figs_dir: "figs"
+
+  # ✅ 对齐 adult：折级输出（你后面统计强桶优势比例要用）
   save_per_fold_metrics: true
   save_bucket_metrics: true
   save_config_copy: true
