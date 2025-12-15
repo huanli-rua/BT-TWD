@@ -41,16 +41,22 @@ def _map_target_with_config(
     df[target_col] = y_raw.map(mapping)
 
     before = len(df)
+    missing_count = df[target_col].isna().sum()
     if dropna_target:
         df = df.dropna(subset=[target_col]).copy()
     elif negative_label is None and positive_label is not None:
         # 兼容旧行为：未指定负类标签且未开启 drop 时，将非正类视为 0
-        missing_count = df[target_col].isna().sum()
         if missing_count > 0:
             log_info(
                 f"【数据加载】{missing_count} 条标签无法映射，未指定负类且未开启 dropna_target，已按 0 处理"
             )
         df[target_col] = df[target_col].fillna(0)
+    elif missing_count > 0:
+        # 当正负类都显式配置时，将无法映射的标签删除，避免 astype 触发 IntCastingNaNError
+        log_info(
+            f"【数据加载】{missing_count} 条标签无法映射，正负类已指定且未开启 dropna_target，已自动删除这些样本"
+        )
+        df = df.dropna(subset=[target_col]).copy()
     after = len(df)
 
     df[target_col] = df[target_col].astype(int)
