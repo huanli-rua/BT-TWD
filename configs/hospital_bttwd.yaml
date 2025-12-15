@@ -83,7 +83,7 @@ BTTWD:
       col: "time_in_hospital"
       bins: [3, 7]
       labels: ["short_stay", "mid_stay", "long_stay"]
-  min_bucket_size: 150
+  min_bucket_size: 100
   max_levels: 3
   use_gain: true
   min_gain_for_split: 0.0
@@ -93,7 +93,7 @@ BTTWD:
   parent_share_rate: 0.2
   min_parent_share: 50
   val_ratio: 0.3
-  min_val_samples_per_bucket: 80
+  min_val_samples_per_bucket: 50
   use_global_backoff: true
   global_estimator: "xgb"
   bucket_estimator: "none"
@@ -127,15 +127,15 @@ BTTWD:
 THRESHOLD:
   mode: "bucket_wise"
   objective: "regret"
-  alpha_grid: [0.3, 0.4, 0.5, 0.6, 0.7]
-  beta_grid:  [0.0, 0.1, 0.2, 0.3, 0.4]
+  alpha_grid: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  beta_grid:  [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
   gap_min: 0.1
   costs:
     C_TP: 0.0
     C_TN: 0.0
     C_FP: 1.0
     C_FN: 3.0
-    C_BP: 2.0
+    C_BP: 1.0
     C_BN: 0.5
   min_samples_for_thresholds: 100
 
@@ -147,7 +147,7 @@ BASELINES:
 
   common:
     threshold_mode: "fixed"
-    fixed_threshold: 0.4
+    fixed_threshold: 0.2
   logreg:
     C: 1.0
     max_iter: 500

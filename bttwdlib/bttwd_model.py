@@ -51,10 +51,12 @@ class BTTWDModel:
             str(v)
             for v in bcfg.get(
                 "stop_split_labels",
-                [
+                [                   
                     "OTHER",
+                    "OTHERS",
                     "Others",
                     "others",
+                    "Other",
                     "other",
                     "OtherType",
                     "OTHER_CARRIER",

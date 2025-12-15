@@ -1,0 +1,170 @@
+DATA:
+  dataset_name: "weatherAUS"
+  raw_path: "../data/weather/weatherAUS.csv"
+  target_col: "RainTomorrow"
+  positive_label: "Yes"
+  negative_label: "No"
+  file_type: "csv"
+  use_kfold: true
+  n_splits: 5
+  shuffle: true
+  stratify: true
+  random_state: 42
+
+PREPROCESS:
+  continuous_cols:
+    - "MinTemp"
+    - "MaxTemp"
+    - "Rainfall"
+    - "Evaporation"
+    - "Sunshine"
+    - "WindGustSpeed"
+    - "WindSpeed9am"
+    - "WindSpeed3pm"
+    - "Humidity9am"
+    - "Humidity3pm"
+    - "Pressure9am"
+    - "Pressure3pm"
+    - "Cloud9am"
+    - "Cloud3pm"
+    - "Temp9am"
+    - "Temp3pm"
+
+  categorical_cols:
+    - "Location"
+    - "WindGustDir"
+    - "WindDir9am"
+    - "WindDir3pm"
+    - "RainToday"
+
+  drop_cols:
+    - "Date"
+
+  impute_strategy:
+    continuous: "median"
+    categorical: "most_frequent"
+  scaler_type: "standard"
+  encoding_type: "onehot"
+  drop_first: true
+  save_feature_names: true
+
+SCORE:
+  bucket_score_mode: "f1_regret_bnd"
+  f1_weight: 1.0
+  regret_weight: 1.0
+  bnd_weight: 0.5
+
+BTTWD:
+  bucket_levels:
+    - level: 1
+      name: "L1_location"
+      type: "category_group"
+      col: "Location"
+      min_count: 500
+      other_label: "OTHERS"
+
+    - level: 2
+      name: "L2_rain_today"
+      type: "category_group"
+      col: "RainToday"
+      groups:
+        - label: "rain_today_yes"
+          values: ["Yes"]
+        - label: "rain_today_no"
+          values: ["No"]
+
+    - level: 3
+      name: "L3_humidity3pm"
+      type: "numeric_bin"
+      col: "Humidity3pm"
+      bins: [40, 70]
+      labels: ["hum_low", "hum_mid", "hum_high"]
+
+    - level: 4
+      name: "L4_cloud3pm"
+      type: "numeric_bin"
+      col: "Cloud3pm"
+      bins: [3, 7]
+      labels: ["cloud_low", "cloud_mid", "cloud_high"]
+
+    - level: 5
+      name: "L5_sunshine"
+      type: "numeric_bin"
+      col: "Sunshine"
+      bins: [3, 8]
+      labels: ["sun_low", "sun_mid", "sun_high"]
+
+  min_bucket_size: 300
+  max_levels: 4
+  use_gain: true
+  min_gain_for_split: 0.0
+  gamma_bucket: 0.0
+  bucket_subsample: 0.7
+  max_train_samples_per_bucket: 60000
+  parent_share_rate: 0.2
+  min_parent_share: 50
+  val_ratio: 0.3
+  min_val_samples_per_bucket: 100
+  use_global_backoff: true
+
+  global_estimator: "xgb"
+  bucket_estimator: "none"
+  posterior_estimator: "logreg"
+  logreg_C: 1.0
+  knn_k: 6
+
+  global_xgb:
+    n_estimators: 400
+    max_depth: 4
+    learning_rate: 0.08
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+
+THRESHOLD:
+  mode: "bucket_wise"
+  objective: "regret"
+  alpha_grid: [0.3, 0.4, 0.5, 0.6, 0.7]
+  beta_grid:  [0.0, 0.1, 0.2, 0.3, 0.4]
+  gap_min: 0.1
+  costs:
+    C_TP: 0.0
+    C_TN: 0.0
+    C_FP: 1.0
+    C_FN: 2.0
+    C_BP: 1.0
+    C_BN: 0.5
+  min_samples_for_thresholds: 200
+
+BASELINES:
+  use_logreg: true
+  use_random_forest: true
+  use_knn: true
+  use_xgboost: true
+
+  common:
+    threshold_mode: "fixed"
+    fixed_threshold: 0.5
+
+EXP:
+  kfold_repeats: 1
+  n_jobs: -1
+  verbose: 1
+
+METRICS:
+  use_metrics: ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa", "Regret"]
+  pos_label: 1
+
+OUTPUT:
+  results_dir: "results/weatherAUS_bttwd"
+  figs_dir: "figs"
+  save_per_fold_metrics: true
+  save_bucket_metrics: true
+  save_config_copy: true
+  save_threshold_logs: true
+  threshold_log_filename: "bucket_thresholds_per_fold.csv"
+
+SEED:
+  global_seed: 42
