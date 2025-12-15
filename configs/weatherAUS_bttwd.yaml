@@ -95,7 +95,7 @@ BTTWD:
       labels: ["sun_low", "sun_mid", "sun_high"]
 
   min_bucket_size: 300
-  max_levels: 4
+  max_levels: 3
   use_gain: true
   min_gain_for_split: 0.0
   gamma_bucket: 0.0
@@ -133,7 +133,7 @@ THRESHOLD:
     C_TP: 0.0
     C_TN: 0.0
     C_FP: 1.0
-    C_FN: 2.0
+    C_FN: 3.0
     C_BP: 1.0
     C_BN: 0.5
   min_samples_for_thresholds: 200
@@ -146,7 +146,7 @@ BASELINES:
 
   common:
     threshold_mode: "fixed"
-    fixed_threshold: 0.5
+    fixed_threshold: 0.4
 
 EXP:
   kfold_repeats: 1

@@ -54,7 +54,7 @@ def _map_target_with_config(
     elif missing_count > 0:
         # 当正负类都显式配置时，将无法映射的标签删除，避免 astype 触发 IntCastingNaNError
         log_info(
-            f"【数据加载】{missing_count} 条标签无法映射，正负类已指定且未开启 dropna_target，已自动删除这些样本"
+            f"【数据加载】{missing_count} 条标签无法映射，占比={missing_count / before:.2%}，正负类已指定且未开启 dropna_target，已自动删除这些样本"
         )
         df = df.dropna(subset=[target_col]).copy()
     after = len(df)
