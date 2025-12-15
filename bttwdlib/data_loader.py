@@ -5,6 +5,67 @@ from scipy.io import arff
 from .utils_logging import log_info
 
 
+def _map_target_with_config(
+    df: pd.DataFrame, target_col: str, data_cfg: dict, extra_mapping: dict | None = None
+) -> pd.DataFrame:
+    """按照配置将目标列安全映射为 0/1，并记录日志。"""
+
+    dropna_target = data_cfg.get("dropna_target", False)
+    positive_label = data_cfg.get("positive_label")
+    negative_label = data_cfg.get("negative_label")
+
+    # 如果目标列已经是 0/1，则直接返回，避免重复映射导致全 NaN
+    uniq_raw = pd.unique(df[target_col].dropna())
+    if uniq_raw.size:
+        uniq_numeric = pd.to_numeric(uniq_raw, errors="coerce")
+        if not pd.isna(uniq_numeric).any():
+            if set(map(int, uniq_numeric)) <= {0, 1}:
+                df[target_col] = df[target_col].astype(int)
+                log_info(
+                    f"【数据加载】目标列 {target_col} 已检测为 0/1 标签，跳过映射逻辑"
+                )
+                return df
+
+    # 统一对标签进行字符串清洗
+    y_raw = df[target_col].astype(str).str.strip().str.lower()
+
+    mapping: dict[str, int] = {}
+    if positive_label is not None:
+        mapping[str(positive_label).strip().lower()] = 1
+    if negative_label is not None:
+        mapping[str(negative_label).strip().lower()] = 0
+
+    if extra_mapping:
+        mapping.update({str(k).strip().lower(): int(v) for k, v in extra_mapping.items()})
+
+    df[target_col] = y_raw.map(mapping)
+
+    before = len(df)
+    if dropna_target:
+        df = df.dropna(subset=[target_col]).copy()
+    elif negative_label is None and positive_label is not None:
+        # 兼容旧行为：未指定负类标签且未开启 drop 时，将非正类视为 0
+        missing_count = df[target_col].isna().sum()
+        if missing_count > 0:
+            log_info(
+                f"【数据加载】{missing_count} 条标签无法映射，未指定负类且未开启 dropna_target，已按 0 处理"
+            )
+        df[target_col] = df[target_col].fillna(0)
+    after = len(df)
+
+    df[target_col] = df[target_col].astype(int)
+
+    log_info(
+        f"【数据加载】标签列 {target_col} 已处理完成："
+        f"dropna_target={dropna_target}, "
+        f"丢弃样本={before - after}, "
+        f"最终样本数={after}, "
+        f"正类比例={df[target_col].mean():.2%}"
+    )
+
+    return df
+
+
 def load_adult_raw(cfg: dict) -> pd.DataFrame:
     """
     从 cfg['DATA']['raw_path'] 读取 CSV，将 "?" 视为缺失值。
@@ -119,6 +180,7 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
     file_type_cfg = data_cfg.get("file_type")
     file_type = str(file_type_cfg).lower() if file_type_cfg is not None else ""
     repo_root = Path(__file__).resolve().parent.parent
+    target_mapped = False
 
     def _resolve_path(path_str: str | None):
         if not path_str:
@@ -176,13 +238,12 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
                 target_col = data_cfg.get("target_col", "y")
                 if target_col not in df.columns:
                     raise KeyError(f"银行数据集中未找到标签列 {target_col}")
-                y_raw = df[target_col].astype(str).str.strip().str.lower()
-                df[target_col] = y_raw.map({"yes": 1, "no": 0})
-                if df[target_col].isna().any():
-                    raise ValueError("银行数据集的标签列存在无法识别的取值（非 yes/no）")
-                df[target_col] = df[target_col].astype(int)
+                data_cfg.setdefault("positive_label", "yes")
+                data_cfg.setdefault("negative_label", "no")
+                df = _map_target_with_config(df, target_col, data_cfg)
                 data_cfg["positive_label"] = 1
                 data_cfg.setdefault("negative_label", 0)
+                target_mapped = True
                 data_cfg.setdefault(
                     "numeric_cols",
                     ["age", "balance", "day", "duration", "campaign", "pdays", "previous"],
@@ -210,26 +271,12 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
                 target_col = data_cfg.get("target_col", "readmitted")
                 if target_col not in df.columns:
                     raise KeyError(f"医院再入院数据集中未找到标签列 {target_col}")
-
-                # 统一小写
-                y_raw = df[target_col].astype(str).str.strip().str.lower()
-
-                # 映射为 0/1（和 diabetic 保持一致）
-                mapping = {"yes": 1, "no": 0}
-                df[target_col] = y_raw.map(mapping)
-
-                if df[target_col].isna().any():
-                    raise ValueError("医院再入院数据集 readmitted 列存在无法识别的取值（非 yes/no）")
-
-                df[target_col] = df[target_col].astype(int)
-
-                # 同步标签定义
+                data_cfg.setdefault("positive_label", "yes")
+                data_cfg.setdefault("negative_label", "no")
+                df = _map_target_with_config(df, target_col, data_cfg)
                 data_cfg["positive_label"] = 1
                 data_cfg.setdefault("negative_label", 0)
-
-                log_info(
-                    f"【数据加载】医院再入院数据集已读取，标签已二值化，样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
-                )
+                target_mapped = True
 
 
 
@@ -238,17 +285,12 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
                 target_col = data_cfg.get("target_col", "readmitted")
                 if target_col not in df.columns:
                     raise KeyError(f"糖尿病再入院数据集中未找到标签列 {target_col}")
-                y_raw = df[target_col].astype(str).str.strip().str.lower()
-                mapping = {"<30": 1, ">30": 0, "no": 0}
-                df[target_col] = y_raw.map(mapping)
-                if df[target_col].isna().any():
-                    raise ValueError("糖尿病数据集 readmitted 列存在无法识别的取值（非 <30/>30/NO）")
-                df[target_col] = df[target_col].astype(int)
+                data_cfg.setdefault("positive_label", "<30")
+                data_cfg.setdefault("negative_label", ">30")
+                df = _map_target_with_config(df, target_col, data_cfg, extra_mapping={"no": 0})
                 data_cfg["positive_label"] = 1
                 data_cfg.setdefault("negative_label", 0)
-                log_info(
-                    f"【数据加载】糖尿病数据集已读取，标签已二值化，样本数={len(df)}，正类比例={df[target_col].mean():.2%}"
-                )
+                target_mapped = True
 
             else:
                 df = _load_csv_like(raw_path, data_cfg)
@@ -289,12 +331,9 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
 
     positive_label = data_cfg.get("positive_label")
     negative_label = data_cfg.get("negative_label")
-    if positive_label is not None and target_col in df.columns:
-        if negative_label is None:
-            df[target_col] = df[target_col].apply(lambda v: 1 if v == positive_label else 0)
-        else:
-            df[target_col] = df[target_col].apply(lambda v: 1 if v == positive_label else 0 if v == negative_label else v)
-        df[target_col] = df[target_col].astype(int)
+    if not target_mapped and positive_label is not None and target_col in df.columns:
+        df = _map_target_with_config(df, target_col, data_cfg)
+        target_mapped = True
 
     if positive_label is not None and target_col in df.columns:
         train_mask = df["split"].str.lower() == "train" if "split" in df.columns else None
