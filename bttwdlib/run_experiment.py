@@ -23,6 +23,7 @@ from bttwdlib import (  # noqa: E402
     run_kfold_experiments,
     show_cfg,
 )
+from bttwdlib.preprocessing import apply_feature_engineering_with_config  # noqa: E402
 from bttwdlib.utils_logging import log_info  # noqa: E402
 from bttwdlib.utils_seed import set_global_seed  # noqa: E402
 
@@ -33,7 +34,13 @@ def _build_bucket_feature_df(df_raw, cfg) -> tuple[np.ndarray, np.ndarray, objec
     X, y, meta = prepare_features_and_labels(df_raw, cfg)
     prep_cfg = cfg.get("PREPROCESS", {})
     bucket_cols: List[str] = (prep_cfg.get("continuous_cols") or []) + (prep_cfg.get("categorical_cols") or [])
-    bucket_df = df_raw[bucket_cols].reset_index(drop=True)
+    bucket_levels = cfg.get("BTTWD", {}).get("bucket_levels", [])
+    for lvl in bucket_levels:
+        col_name = lvl.get("col") or lvl.get("feature")
+        if col_name and col_name not in bucket_cols:
+            bucket_cols.append(col_name)
+    df_processed = meta.get("df_processed", df_raw)
+    bucket_df = df_processed[bucket_cols].reset_index(drop=True)
     return X, y, meta, bucket_df, bucket_cols
 
 
@@ -54,7 +61,8 @@ def _transform_with_pipeline(df_raw, cfg, pipeline, bucket_cols: list[str]):
     if source_target_col and source_target_col != target_col_for_model:
         drop_cols.add(source_target_col)
 
-    X_raw = df_raw.drop(columns=list(drop_cols), errors="ignore")
+    df_processed = apply_feature_engineering_with_config(df_raw, cfg)
+    X_raw = df_processed.drop(columns=list(drop_cols), errors="ignore")
     X = pipeline.transform(X_raw)
     if sparse.issparse(X):
         X = X.toarray()
@@ -67,7 +75,7 @@ def _transform_with_pipeline(df_raw, cfg, pipeline, bucket_cols: list[str]):
     if negative_label is not None:
         y = np.where(df_raw[target_col_for_model] == positive_label, 1, 0)
 
-    bucket_df = df_raw[bucket_cols].reset_index(drop=True)
+    bucket_df = df_processed[bucket_cols].reset_index(drop=True)
     return X, y, bucket_df
 
 

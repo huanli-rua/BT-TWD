@@ -14,6 +14,48 @@ def _infer_columns(df: pd.DataFrame, target_col: str):
     return continuous_cols, categorical_cols
 
 
+def _apply_credit_default_feature_engineering(df: pd.DataFrame, fe_cfg: dict) -> pd.DataFrame:
+    """按配置生成信用卡违约相关的派生特征。"""
+
+    df = df.copy()
+    pay_cols = fe_cfg.get("pay_status_cols") or []
+    missing_pay_cols = [col for col in pay_cols if col not in df.columns]
+    if missing_pay_cols:
+        raise KeyError(f"缺少信用卡逾期状态列：{', '.join(missing_pay_cols)}")
+
+    ever_delay_col = fe_cfg.get("derive_ever_delay_col", "ever_delay")
+    max_delay_col = fe_cfg.get("derive_max_delay_col", "max_delay")
+    max_delay_bin_col = fe_cfg.get("derive_max_delay_bin_col", "max_delay_bin")
+    max_delay_bins = fe_cfg.get("max_delay_bins") or []
+    max_delay_labels = fe_cfg.get("max_delay_labels")
+
+    pay_status_df = df[pay_cols]
+    df[ever_delay_col] = (pay_status_df > 0).any(axis=1).astype(int)
+
+    df[max_delay_col] = pay_status_df.clip(lower=0).max(axis=1).astype(int)
+    df[max_delay_bin_col] = (
+        pd.cut(df[max_delay_col], bins=max_delay_bins, labels=max_delay_labels, include_lowest=True)
+        .astype(object)
+        .fillna("unknown")
+    )
+
+    log_info("已生成 credit_default 派生特征：ever_delay / max_delay / max_delay_bin")
+    log_info(f"ever_delay 分布：\n{df[ever_delay_col].value_counts(dropna=False).to_string()}")
+    log_info(f"max_delay_bin 分布：\n{df[max_delay_bin_col].value_counts(dropna=False).to_string()}")
+    log_info(f"max_delay_bins={max_delay_bins}, labels={max_delay_labels}")
+    return df
+
+
+def apply_feature_engineering_with_config(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """根据配置执行可选的特征工程，返回拷贝后的 DataFrame。"""
+
+    prep_cfg = cfg.get("PREPROCESS", {})
+    fe_cfg = prep_cfg.get("feature_engineering") or {}
+    if fe_cfg.get("enable_credit_default_derived"):
+        return _apply_credit_default_feature_engineering(df, fe_cfg)
+    return df.copy()
+
+
 def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
     """
     返回 X, y, meta：
@@ -49,6 +91,9 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
         elif strategy == "drop":
             df.dropna(inplace=True)
         log_info(f"【预处理】缺失值填充策略={strategy}")
+
+    # 特征工程：信用卡违约派生特征
+    df = apply_feature_engineering_with_config(df, cfg)
 
     # 推断列
     continuous_cols = (
@@ -132,5 +177,6 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
         "continuous_cols": continuous_cols,
         "categorical_cols": categorical_cols,
         "preprocess_pipeline": pipeline,
+        "df_processed": df,
     }
     return X, y, meta

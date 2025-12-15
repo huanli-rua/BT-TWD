@@ -1,4 +1,5 @@
 import pandas as pd
+
 from .utils_logging import log_info
 
 
@@ -53,6 +54,13 @@ class BucketTree:
         return pd.Series(["unknown"] * len(series), index=series.index)
 
     def assign_buckets(self, X_df: pd.DataFrame) -> pd.Series:
+        missing_cols = [
+            lvl.get("col") or lvl.get("feature")
+            for lvl in self.levels_cfg
+            if (lvl.get("col") or lvl.get("feature")) not in X_df.columns
+        ]
+        if missing_cols:
+            raise KeyError(f"分桶数据缺少以下列：{', '.join(missing_cols)}")
         bucket_parts = []
         for level_cfg in self.levels_cfg:
             col = level_cfg.get("col") or level_cfg.get("feature")
@@ -76,6 +84,14 @@ class BucketTree:
     def assign_bucket_parts(self, X_df: pd.DataFrame) -> list[pd.Series]:
         """返回每一层的桶标签序列，便于增量式分裂逻辑使用。"""
 
+        missing_cols = [
+            lvl.get("col") or lvl.get("feature")
+            for lvl in self.levels_cfg
+            if (lvl.get("col") or lvl.get("feature")) not in X_df.columns
+        ]
+        if missing_cols:
+            raise KeyError(f"分桶数据缺少以下列：{', '.join(missing_cols)}")
+
         parts = []
         for level_cfg in self.levels_cfg:
             col = level_cfg.get("col") or level_cfg.get("feature")
@@ -93,7 +109,16 @@ class BucketTree:
         return parts
 
     def get_level_names(self) -> list[str]:
-        return [lvl.get("name") for lvl in self.levels_cfg]
+        names = []
+        for lvl in self.levels_cfg:
+            if lvl.get("name"):
+                names.append(lvl["name"])
+            elif lvl.get("level") is not None:
+                col = lvl.get("col") or lvl.get("feature", "unknown")
+                names.append(f"L{lvl['level']}_{col}")
+            else:
+                names.append(lvl.get("col") or lvl.get("feature") or "level")
+        return names
 
 
 def get_parent_bucket_id(bucket_id: str) -> str | None:
