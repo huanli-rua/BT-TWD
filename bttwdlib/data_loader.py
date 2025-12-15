@@ -315,7 +315,8 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
         elif file_type in {"excel", "xlsx", "xls"}:
             sheet = data_cfg.get("sheet_name", 0)
             try:
-                df = pd.read_excel(raw_path, sheet_name=sheet)
+                engine = "xlrd" if file_type == "xls" else None
+                df = pd.read_excel(raw_path, sheet_name=sheet, engine=engine)
             except ImportError as e:  # pragma: no cover - 依赖问题
                 raise ImportError("读取Excel失败，可能缺少xlrd>=2.0.1，请安装后重试") from e
         elif file_type in {"json", "jsonl"}:

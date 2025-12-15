@@ -109,7 +109,16 @@ class BucketTree:
         return parts
 
     def get_level_names(self) -> list[str]:
-        return [lvl.get("name") for lvl in self.levels_cfg]
+        names = []
+        for lvl in self.levels_cfg:
+            if lvl.get("name"):
+                names.append(lvl["name"])
+            elif lvl.get("level") is not None:
+                col = lvl.get("col") or lvl.get("feature", "unknown")
+                names.append(f"L{lvl['level']}_{col}")
+            else:
+                names.append(lvl.get("col") or lvl.get("feature") or "level")
+        return names
 
 
 def get_parent_bucket_id(bucket_id: str) -> str | None:

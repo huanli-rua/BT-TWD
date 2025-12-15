@@ -2,7 +2,7 @@ DATA:
   dataset_name: "credit_default"
   raw_path: "../data/credit/default of credit card clients.xls"
   file_type: "xls"
-  target_col: "default.payment.next.month"
+  target_col: "default payment next month"
   positive_label: 1
   negative_label: 0
   use_kfold: false
@@ -57,12 +57,10 @@ BTTWD:
   bucket_levels:
     - level: 1
       name: "L1_ever_delay"
-      type: "categorical_group"
+      type: "numeric_bin"
       col: "ever_delay"
-      groups:
-        delay: [1]
-        no_delay: [0]
-      default_group: "unknown"
+      bins: [0.5]
+      labels: ["no_delay", "has_delay"]
 
     - level: 2
       name: "L2_max_delay_bin"
@@ -79,8 +77,8 @@ BTTWD:
       name: "L3_limit_bal"
       type: "numeric_bin"
       col: "LIMIT_BAL"
-      bins: [50000, 100000, 200000, 400000]
-      labels: ["<=50k", "50-100k", "100-200k", "200-400k", ">400k"]
+      bins: [80000, 200000]
+      labels: ["low_limit", "mid_limit", "high_limit"]
   min_bucket_size: 200
   max_levels: 3
   use_gain: true
