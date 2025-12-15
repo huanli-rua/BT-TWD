@@ -33,6 +33,11 @@ def _build_bucket_feature_df(df_raw, cfg) -> tuple[np.ndarray, np.ndarray, objec
     X, y, meta = prepare_features_and_labels(df_raw, cfg)
     prep_cfg = cfg.get("PREPROCESS", {})
     bucket_cols: List[str] = (prep_cfg.get("continuous_cols") or []) + (prep_cfg.get("categorical_cols") or [])
+    bucket_levels = cfg.get("BTTWD", {}).get("bucket_levels", [])
+    for lvl in bucket_levels:
+        col_name = lvl.get("col") or lvl.get("feature")
+        if col_name and col_name not in bucket_cols:
+            bucket_cols.append(col_name)
     bucket_df = df_raw[bucket_cols].reset_index(drop=True)
     return X, y, meta, bucket_df, bucket_cols
 

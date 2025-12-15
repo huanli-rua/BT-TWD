@@ -50,6 +50,33 @@ def prepare_features_and_labels(df: pd.DataFrame, cfg: dict):
             df.dropna(inplace=True)
         log_info(f"【预处理】缺失值填充策略={strategy}")
 
+    # 特征工程：信用卡违约派生特征
+    fe_cfg = prep_cfg.get("feature_engineering") or {}
+    if fe_cfg.get("enable_credit_default_derived"):
+        pay_cols = fe_cfg.get("pay_status_cols") or []
+        missing_pay_cols = [col for col in pay_cols if col not in df.columns]
+        if missing_pay_cols:
+            raise KeyError(f"缺少信用卡逾期状态列：{', '.join(missing_pay_cols)}")
+
+        ever_delay_col = fe_cfg.get("derive_ever_delay_col", "ever_delay")
+        max_delay_col = fe_cfg.get("derive_max_delay_col", "max_delay")
+        max_delay_bin_col = fe_cfg.get("derive_max_delay_bin_col", "max_delay_bin")
+        max_delay_bins = fe_cfg.get("max_delay_bins") or []
+        max_delay_labels = fe_cfg.get("max_delay_labels")
+
+        pay_status_df = df[pay_cols]
+        df[ever_delay_col] = (pay_status_df > 0).any(axis=1).astype(int)
+
+        df[max_delay_col] = pay_status_df.clip(lower=0).max(axis=1).astype(int)
+        df[max_delay_bin_col] = pd.cut(
+            df[max_delay_col], bins=max_delay_bins, labels=max_delay_labels, include_lowest=True
+        )
+
+        log_info("已生成 credit_default 派生特征：ever_delay / max_delay / max_delay_bin")
+        log_info(f"ever_delay 分布：\n{df[ever_delay_col].value_counts(dropna=False).to_string()}")
+        log_info(f"max_delay_bin 分布：\n{df[max_delay_bin_col].value_counts(dropna=False).to_string()}")
+        log_info(f"max_delay_bins={max_delay_bins}, labels={max_delay_labels}")
+
     # 推断列
     continuous_cols = (
         prep_cfg.get("continuous_cols")
