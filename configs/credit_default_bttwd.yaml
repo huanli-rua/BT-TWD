@@ -94,8 +94,8 @@ BTTWD:
   posterior_estimator: "logreg"
   logreg_C: 1.0
 
-THRESHOLD:
-  mode: "bucket_wise"
+THRESHOLDS:
+  thresholds_mode: "bucket_wise"
   objective: "regret"
   alpha_grid: [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
   beta_grid: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
