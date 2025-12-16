@@ -122,7 +122,7 @@ THRESHOLDS:
     C_FN: 1.5                             # 假负类成本（漏报）
     C_BP: 0.75                              # 边界-正成本
     C_BN: 0.25                              # 边界-负成本
-  min_samples_for_thresholds: 100   # 一个桶触发单独阈值搜索所需要的最少验证样本数（不足则直接回退父桶/ROOT 阈值）
+  min_samples_for_thresholds: 50   # 一个桶触发单独阈值搜索所需要的最少验证样本数（不足则直接回退父桶/ROOT 阈值）
 
 
 BASELINES:

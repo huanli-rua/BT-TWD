@@ -1,0 +1,13 @@
+bucket_id,level,assigned_samples,used_local_decision,fallback_to_parent,parent_id,is_weak,effective_bucket_id,fallback_from_children
+L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=low_limit,3,159,0,159,L1_ever_delay=has_delay|L2_max_delay_bin=medium,True,L1_ever_delay=has_delay|L2_max_delay_bin=medium,0
+L1_ever_delay=has_delay|L2_max_delay_bin=medium,2,0,213,0,L1_ever_delay=has_delay,False,L1_ever_delay=has_delay|L2_max_delay_bin=medium,213
+L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=others,3,54,0,54,L1_ever_delay=has_delay|L2_max_delay_bin=medium,True,L1_ever_delay=has_delay|L2_max_delay_bin=medium,0
+L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=high_limit,3,386,386,0,L1_ever_delay=has_delay|L2_max_delay_bin=mild,False,L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=high_limit,0
+L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=low_limit,3,789,789,0,L1_ever_delay=has_delay|L2_max_delay_bin=mild,False,L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=low_limit,0
+L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=mid_limit,3,610,610,0,L1_ever_delay=has_delay|L2_max_delay_bin=mild,False,L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=mid_limit,0
+L1_ever_delay=has_delay|L2_max_delay_bin=others,2,31,0,31,L1_ever_delay=has_delay,True,L1_ever_delay=has_delay,0
+L1_ever_delay=has_delay,1,0,31,0,ROOT,False,L1_ever_delay=has_delay,31
+L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=high_limit,3,1502,1502,0,L1_ever_delay=no_delay|L2_max_delay_bin=none,False,L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=high_limit,0
+L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=low_limit,3,1165,0,1165,L1_ever_delay=no_delay|L2_max_delay_bin=none,True,ROOT,0
+ROOT,0,0,1165,0,ROOT,False,ROOT,1165
+L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=mid_limit,3,1304,1304,0,L1_ever_delay=no_delay|L2_max_delay_bin=none,False,L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=mid_limit,0
