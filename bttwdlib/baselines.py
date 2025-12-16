@@ -2,7 +2,7 @@ import numpy as np
 from scipy import sparse
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 
 try:
@@ -13,7 +13,13 @@ except ImportError:  # pragma: no cover - optional dependency
     XGBClassifier = None
     _XGB_AVAILABLE = False
 
-from .metrics import compute_binary_metrics, log_metrics, predict_binary_by_cost
+from .metrics import (
+    compute_binary_metrics,
+    compute_s3_metrics,
+    log_metrics,
+    predict_binary_by_cost,
+)
+from .threshold_search import search_thresholds_with_regret
 from .utils_logging import log_info
 
 
@@ -27,7 +33,7 @@ def get_decision_threshold(model_key: str, cfg: dict) -> tuple[float, str, bool]
     base_cfg = cfg.get("BASELINES", {})
     common_cfg = base_cfg.get("common", {})
 
-    mode = common_cfg.get("threshold_mode", "fixed")
+    mode = common_cfg.get("threshold_mode", "fixed").strip().lower()
     global_threshold = float(common_cfg.get("fixed_threshold", 0.5))
 
     if mode == "fixed":
@@ -121,7 +127,9 @@ def _run_baseline_cv(
     y = _make_writable_vector(y)
 
     metrics_cfg = cfg.get("METRICS", {})
+    threshold_cfg = cfg.get("THRESHOLD") or cfg.get("THRESHOLDS") or {}
     threshold, mode, used_custom = get_decision_threshold(model_key, cfg)
+    costs = costs or threshold_cfg.get("costs", {})
 
     per_fold_records: list[dict] = []
     if isinstance(cv_splitter, StratifiedKFold):
@@ -133,7 +141,11 @@ def _run_baseline_cv(
             random_state=42,
         )
 
-    if mode == "per_model" and used_custom:
+    if mode == "search":
+        log_info(
+            f"【基线-{model_name}】阈值模式=search，将按 α/β 网格搜索最优 regret（使用验证集）"
+        )
+    elif mode == "per_model" and used_custom:
         log_info(f"【基线-{model_name}】使用模型自定义阈值={threshold:.3f}（per_model 模式）")
     elif mode == "per_model":
         log_info(f"【基线-{model_name}】使用通用阈值={threshold:.3f}（per_model 模式）")
@@ -148,18 +160,62 @@ def _run_baseline_cv(
             log_info(f"【基线-{model_name}】第 {fold_idx} 折训练集仅包含单一类别，跳过该折")
             fold_idx += 1
             continue
-        clf.fit(X[train_idx], y[train_idx])
-
-        if hasattr(clf, "predict_proba"):
-            y_score = clf.predict_proba(X[test_idx])[:, 1]
-            y_pred = (y_score >= threshold).astype(int)
+        if mode == "search":
+            X_train_fold = X[train_idx]
+            y_train_fold = y_train
+            X_tr, X_val, y_tr, y_val = train_test_split(
+                X_train_fold,
+                y_train_fold,
+                test_size=threshold_cfg.get("val_ratio", 0.2),
+                random_state=42,
+                stratify=y_train_fold if np.unique(y_train_fold).size > 1 else None,
+            )
+            clf.fit(X_tr, y_tr)
+            if not hasattr(clf, "predict_proba"):
+                log_info(
+                    f"【基线-{model_name}】模型不支持 predict_proba，search 模式降级为固定阈值 {threshold:.3f}"
+                )
+                y_pred = clf.predict(X[test_idx])
+                y_score = np.zeros_like(y_pred, dtype=float)
+                metrics_dict = compute_binary_metrics(
+                    y[test_idx], y_pred, y_score, metrics_cfg, costs=costs
+                )
+                metrics_dict.setdefault("BND_ratio", 0.0)
+                metrics_dict.setdefault("POS_Coverage", float("nan"))
+            else:
+                y_score_val = clf.predict_proba(X_val)[:, 1]
+                alpha_grid = threshold_cfg.get("alpha_grid", [0.5])
+                beta_grid = threshold_cfg.get("beta_grid", [0.0])
+                gap_min = threshold_cfg.get("gap_min", 0.0)
+                alpha_opt, beta_opt, _ = search_thresholds_with_regret(
+                    y_score_val, y_val, alpha_grid, beta_grid, costs, gap_min=gap_min
+                )
+                y_score = clf.predict_proba(X[test_idx])[:, 1]
+                y_pred = np.where(
+                    y_score >= alpha_opt,
+                    1,
+                    np.where(y_score <= beta_opt, 0, -1),
+                )
+                metrics_dict = compute_s3_metrics(
+                    y[test_idx], y_pred, y_score, metrics_cfg, costs=costs
+                )
+                metrics_dict["alpha"] = float(alpha_opt)
+                metrics_dict["beta"] = float(beta_opt)
         else:
-            y_pred = clf.predict(X[test_idx])
-            y_score = np.zeros_like(y_pred, dtype=float)
+            clf.fit(X[train_idx], y[train_idx])
 
-        metrics_dict = compute_binary_metrics(y[test_idx], y_pred, y_score, metrics_cfg, costs=costs)
-        metrics_dict.setdefault("BND_ratio", 0.0)
-        metrics_dict.setdefault("POS_Coverage", float("nan"))
+            if hasattr(clf, "predict_proba"):
+                y_score = clf.predict_proba(X[test_idx])[:, 1]
+                y_pred = (y_score >= threshold).astype(int)
+            else:
+                y_pred = clf.predict(X[test_idx])
+                y_score = np.zeros_like(y_pred, dtype=float)
+
+            metrics_dict = compute_binary_metrics(
+                y[test_idx], y_pred, y_score, metrics_cfg, costs=costs
+            )
+            metrics_dict.setdefault("BND_ratio", 0.0)
+            metrics_dict.setdefault("POS_Coverage", float("nan"))
         metrics_dict["fold"] = fold_idx
         per_fold_records.append(metrics_dict)
         fold_idx += 1
