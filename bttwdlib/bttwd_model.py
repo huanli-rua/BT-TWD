@@ -855,12 +855,28 @@ class BTTWDModel:
                 model.fit(X_train_bucket, y_train_bucket)
                 self.bucket_models[bucket_id] = model
 
-            enough_val = len(val_idx) >= self.min_val_samples_per_bucket and np.unique(y_val_bucket).size >= 2 and not is_others
+            enough_val = (
+                len(val_idx) >= self.min_val_samples_per_bucket
+                and np.unique(y_val_bucket).size >= 2
+                and not is_others
+            )
             bucket_score = None
             alpha = beta = None
-            stats = {}
+            stats = {
+                "regret": float("nan"),
+                "f1": float("nan"),
+                "precision": float("nan"),
+                "recall": float("nan"),
+                "bnd_ratio": float("nan"),
+                "pos_coverage": float("nan"),
+                "bac": float("nan"),
+                "auc": float("nan"),
+                "n_samples": 0,
+            }
             costs_used = self.costs
             used_bucket_specific = False
+            threshold_data_source = "val" if enough_val else "all"
+
             if enough_val:
                 if model is None:
                     if self.global_model is not None:
@@ -872,33 +888,65 @@ class BTTWDModel:
                 alpha, beta, stats, costs_used, used_bucket_specific = self._search_thresholds(
                     proba_val, y_val_bucket, bucket_id=bucket_id
                 )
-                score_metrics = {
-                    "regret": stats.get("regret", np.nan),
-                    "bac": stats.get("bac", np.nan),
-                    "f1": stats.get("f1", np.nan),
-                    "BND_ratio": stats.get("bnd_ratio", np.nan),
-                }
-                bucket_score = compute_bucket_score(score_metrics, self.score_cfg)
+                if self.use_gain_weak_backoff:
+                    score_metrics = {
+                        "regret": stats.get("regret", np.nan),
+                        "bac": stats.get("bac", np.nan),
+                        "f1": stats.get("f1", np.nan),
+                        "BND_ratio": stats.get("bnd_ratio", np.nan),
+                    }
+                    bucket_score = compute_bucket_score(score_metrics, self.score_cfg)
             else:
-                stats = {"regret": float("nan"), "f1": float("nan"), "precision": float("nan"), "recall": float("nan"), "bnd_ratio": float("nan"), "pos_coverage": float("nan"), "bac": float("nan"), "auc": float("nan"), "n_samples": 0}
+                bucket_idx = np.asarray(data.get("all", []), dtype=int)
+                y_bucket = y[bucket_idx]
+                stats["n_samples"] = int(len(bucket_idx))
 
-            parent_score = bucket_scores.get(parent_id) if parent_id in bucket_scores else global_score
+                if len(bucket_idx) > 0:
+                    if np.unique(y_bucket).size >= 2:
+                        if model is None:
+                            if self.global_model is not None:
+                                proba_bucket = self.global_model.predict_proba(X[bucket_idx])[:, 1]
+                            else:
+                                proba_bucket = np.full(len(bucket_idx), self.global_pos_rate)
+                        else:
+                            proba_bucket = model.predict_proba(X[bucket_idx])[:, 1]
+                        alpha, beta, stats, costs_used, used_bucket_specific = self._search_thresholds(
+                            proba_bucket, y_bucket, bucket_id=bucket_id
+                        )
+                    else:
+                        unique_label = np.unique(y_bucket)
+                        only_label = int(unique_label[0]) if len(unique_label) else 0
+                        alpha, beta = (1.0, 1.0) if only_label == 0 else (0.0, 0.0)
+                else:
+                    alpha, beta = self.global_alpha, self.global_beta
+                    threshold_data_source = "global_default"
+
+            parent_score = None
+            if self.use_gain_weak_backoff:
+                parent_score = bucket_scores.get(parent_id) if parent_id in bucket_scores else global_score
+
             gain_like = None
-            if bucket_score is not None and parent_score is not None:
+            if self.use_gain_weak_backoff and bucket_score is not None and parent_score is not None:
                 gain_like = bucket_score - parent_score
 
-            weak_due_to_size = len(val_idx) < self.min_val_samples_per_bucket or is_others
             weak_due_to_gain = (
                 self.use_gain_weak_backoff
                 and gain_like is not None
                 and gain_like < self.min_gain_for_split
             )
-            status = "strong"
-            if weak_due_to_size or bucket_score is None or weak_due_to_gain:
-                status = "weak"
+            weak_due_to_eval = not enough_val
 
-            threshold_source_bucket = bucket_id if status == "strong" else (parent_id if parent_id is not None else "ROOT")
-            use_parent_threshold = status == "weak"
+            if not self.use_gain_weak_backoff:
+                status = "strong"
+                use_parent_threshold = False
+                threshold_source_bucket = bucket_id
+            else:
+                status = "strong"
+                if weak_due_to_eval or weak_due_to_gain:
+                    status = "weak"
+
+                threshold_source_bucket = bucket_id if status == "strong" else (parent_id if parent_id is not None else "ROOT")
+                use_parent_threshold = status == "weak"
 
             self.bucket_info[bucket_id] = {
                 "n_samples": int(len(data.get("all", []))),
@@ -907,9 +955,11 @@ class BTTWDModel:
                 "gain_like": gain_like,
                 "bucket_score": bucket_score,
                 "parent_score": parent_score,
+                "use_gain_weak_backoff": self.use_gain_weak_backoff,
                 "effective_bucket_id": threshold_source_bucket,
+                "threshold_data_source": threshold_data_source,
             }
-            if bucket_score is not None:
+            if self.use_gain_weak_backoff and bucket_score is not None:
                 bucket_scores[bucket_id] = bucket_score
 
             record.update(
@@ -933,13 +983,15 @@ class BTTWDModel:
                     "gain_value": float(gain_like) if gain_like is not None else float("nan"),
                     "is_weak": status == "weak",
                     "threshold_source_bucket": threshold_source_bucket,
+                    "use_gain_weak_backoff": self.use_gain_weak_backoff,
+                    "threshold_data_source": threshold_data_source,
                 }
             )
 
             if status == "strong" and alpha is not None and beta is not None:
                 self.bucket_thresholds[bucket_id] = (alpha, beta)
                 log_info(
-                    f"【阈值】桶 {bucket_id}（n_val={len(val_idx)}）使用本地阈值 α={alpha:.4f}, β={beta:.4f}",
+                    f"【阈值】桶 {bucket_id}（n_val={len(val_idx)}，source={threshold_data_source}) 使用本地阈值 α={alpha:.4f}, β={beta:.4f}",
                 )
             elif status == "weak":
                 log_info(
@@ -954,6 +1006,7 @@ class BTTWDModel:
                 f"    Regret={stats.get('regret', float('nan')):.3f}, BND_ratio={stats.get('bnd_ratio', float('nan')):.3f}, "
                 f"POS_coverage={stats.get('pos_coverage', float('nan')):.3f},\n"
                 f"    Score({self.score_cfg.get('bucket_score_mode')} )={bucket_score if bucket_score is not None else float('nan'):.3f}"
+                f"，threshold_source={threshold_data_source}"
             )
 
             if parent_id is not None:
