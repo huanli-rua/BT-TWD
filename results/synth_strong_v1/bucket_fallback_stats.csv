@@ -1,0 +1,15 @@
+bucket_id,level,assigned_samples,used_local_decision,fallback_to_parent,parent_id,is_weak,effective_bucket_id,fallback_from_children
+L1_group=A|L2_x1=high,2,3062,3062,0,L1_group=A,False,L1_group=A|L2_x1=high,0
+L1_group=A|L2_x1=low,2,3101,3101,0,L1_group=A,False,L1_group=A|L2_x1=low,0
+L1_group=A|L2_x1=mid,2,3875,0,3875,L1_group=A,True,ROOT,0
+ROOT,0,0,13863,0,ROOT,False,ROOT,13863
+L1_group=B|L2_x1=high,2,3144,3144,0,L1_group=B,False,L1_group=B|L2_x1=high,0
+L1_group=B|L2_x1=low,2,3088,0,3088,L1_group=B,True,ROOT,0
+L1_group=B|L2_x1=mid,2,3771,0,3771,L1_group=B,True,ROOT,0
+L1_group=C|L2_x1=high,2,3129,0,3129,L1_group=C,True,ROOT,0
+L1_group=C|L2_x1=low,2,3151,3151,0,L1_group=C,False,L1_group=C|L2_x1=low,0
+L1_group=C|L2_x1=mid,2,3769,3769,0,L1_group=C,False,L1_group=C|L2_x1=mid,0
+L1_group=D|L2_x1=high,2,3072,0,3072,L1_group=D,True,L1_group=D,0
+L1_group=D,1,0,6850,0,ROOT,False,L1_group=D,6850
+L1_group=D|L2_x1=low,2,3060,3060,0,L1_group=D,False,L1_group=D|L2_x1=low,0
+L1_group=D|L2_x1=mid,2,3778,0,3778,L1_group=D,True,L1_group=D,0

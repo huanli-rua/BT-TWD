@@ -1,11 +1,15 @@
 DATA:
   dataset_name: "synth_strong_v1"
-  raw_path: "data/synth_strong_v1.csv"
+  raw_path: "../data/synth/synth_strong_v1.csv"
   target_col: "target"
   positive_label: 1
   negative_label: 0
   file_type: "csv"
-  use_kfold: false
+  use_kfold: true
+  kfold:
+    n_splits: 5
+    shuffle: true
+    random_state: 42
   split:
     strategy: "random_stratified"
     train_ratio: 0.6
@@ -77,7 +81,7 @@ BTTWD:
   val_ratio: 0.3
   min_val_samples_per_bucket: 100
   use_global_backoff: true
-  global_estimator: "logreg"
+  global_estimator: "xgb"
   bucket_estimator: "none"
   posterior_estimator: "logreg"
   logreg_C: 1.0
@@ -116,18 +120,18 @@ THRESHOLD:
     C_TP: 0.0
     C_TN: 0.0
     C_FP: 1.0
-    C_FN: 4.0
+    C_FN: 3.0
     C_BP: 1.0
     C_BN: 0.5
   min_samples_for_thresholds: 100
 
 BASELINES:
   use_logreg: true
-  use_random_forest: false
-  use_knn: false
+  use_random_forest: true
+  use_knn: true
   use_xgboost: true
   common:
-    threshold_mode: "search"           # 基线也按 α/β 网格搜索，保持与 BT 阈值策略可比
+    threshold_mode: "fixed"           # 基线也按 α/β 网格搜索，保持与 BT 阈值策略可比
     fixed_threshold: 0.3
   logreg:
     C: 1.0
@@ -153,5 +157,15 @@ BASELINES:
     custom_threshold: 0.35
 
 OUTPUT:
-  results_dir: "results"
-  run_name: "synth_strong_v1_demo"
+  results_dir: "results/synth_strong_v1"
+  figs_dir: "figs"
+
+  # ✅ 对齐 adult：折级输出（你后面统计强桶优势比例要用）
+  save_per_fold_metrics: true
+  save_bucket_metrics: true
+  save_config_copy: true
+  save_threshold_logs: true
+  threshold_log_filename: "bucket_thresholds_per_fold.csv"
+
+SEED:
+  global_seed: 42

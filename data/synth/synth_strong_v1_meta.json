@@ -1,0 +1,51 @@
+{
+  "seed": 42,
+  "n_samples": 200000,
+  "n_groups": 4,
+  "group_labels": [
+    "A",
+    "B",
+    "C",
+    "D"
+  ],
+  "hetero_scale": 1.8,
+  "base_intercepts": [
+    -2.0,
+    -0.5,
+    0.5,
+    2.0
+  ],
+  "scaled_intercepts": [
+    -3.6,
+    -0.9,
+    0.9,
+    3.6
+  ],
+  "n_x": 10,
+  "n_z": 5,
+  "eps_std": 0.2,
+  "weights_mean": -0.19088616254102014,
+  "weights_std": 0.8385551114864811,
+  "target_rate": 0.249955,
+  "expected_rate": 0.24991273429597755,
+  "target_rate_cfg": 0.25,
+  "group_stats": {
+    "A": {
+      "count": 49807,
+      "positive_rate": 0.02431385146666131
+    },
+    "B": {
+      "count": 49948,
+      "positive_rate": 0.12026507567870585
+    },
+    "C": {
+      "count": 50323,
+      "positive_rate": 0.26812789380601315
+    },
+    "D": {
+      "count": 49922,
+      "positive_rate": 0.5865149633428148
+    }
+  },
+  "bias": -2.8984375
+}
