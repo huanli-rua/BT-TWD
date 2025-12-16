@@ -62,8 +62,8 @@ def main():
 
     version = args.version.lower()
     if version == "v2":
-        out_path = args.out or "data/synth_strong_v2.csv"
-        meta_path = args.meta_out or "data/synth_strong_v2_meta.json"
+        out_path = args.out or "data/synth/synth_strong_v2.csv"
+        meta_path = args.meta_out or "data/synth/synth_strong_v2_meta.json"
         df, meta = generate_synth_strong_v2(
             n=args.n,
             seed=args.seed,
@@ -77,8 +77,8 @@ def main():
         )
         save_synth_strong_v2(df, meta, out_path, meta_path)
     else:
-        out_path = args.out or "data/synth_strong_v1.csv"
-        meta_path = args.meta_out or "data/synth_strong_v1_meta.json"
+        out_path = args.out or "data/synth/synth_strong_v1.csv"
+        meta_path = args.meta_out or "data/synth/synth_strong_v1_meta.json"
         df, meta = generate_synth_strong_v1(
             n=args.n,
             seed=args.seed,

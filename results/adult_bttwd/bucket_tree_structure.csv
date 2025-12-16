@@ -21,8 +21,8 @@ L1_age=young|L2_education=low,L1_age=young,2,L2_education,categorical_group,low,
 L1_age=young|L2_education=mid,L1_age=young,2,L2_education,categorical_group,mid,2433,341,197,,False,True,ROOT
 L1_age=young|L2_education=others,L1_age=young,2,L2_education,categorical_group,others,43,31,12,,True,True,ROOT
 L1_age=mid|L2_education=high|L3_hours-per-week=high_hours,L1_age=mid|L2_education=high,3,L3_hours-per-week,numeric_bin,high_hours,902,642,260,,True,True,L1_age=mid
-L1_age=mid|L2_education=high|L3_hours-per-week=low_hours,L1_age=mid|L2_education=high,3,L3_hours-per-week,numeric_bin,low_hours,437,292,145,,True,True,L1_age=mid
-L1_age=mid|L2_education=high|L3_hours-per-week=normal_hours,L1_age=mid|L2_education=high,3,L3_hours-per-week,numeric_bin,normal_hours,2061,1468,593,,True,True,L1_age=mid
+L1_age=mid|L2_education=high|L3_hours-per-week=low_hours,L1_age=mid|L2_education=high,3,L3_hours-per-week,numeric_bin,low_hours,437,292,145,,True,False,L1_age=mid|L2_education=high|L3_hours-per-week=low_hours
+L1_age=mid|L2_education=high|L3_hours-per-week=normal_hours,L1_age=mid|L2_education=high,3,L3_hours-per-week,numeric_bin,normal_hours,2061,1468,593,,True,False,L1_age=mid|L2_education=high|L3_hours-per-week=normal_hours
 L1_age=mid|L2_education=low|L3_hours-per-week=normal_hours,L1_age=mid|L2_education=low,3,L3_hours-per-week,numeric_bin,normal_hours,110,73,37,,True,True,L1_age=mid
 L1_age=mid|L2_education=low|L3_hours-per-week=others,L1_age=mid|L2_education=low,3,L3_hours-per-week,numeric_bin,others,55,37,18,,True,True,L1_age=mid
 L1_age=mid|L2_education=mid|L3_hours-per-week=high_hours,L1_age=mid|L2_education=mid,3,L3_hours-per-week,numeric_bin,high_hours,583,400,183,,True,True,L1_age=mid
