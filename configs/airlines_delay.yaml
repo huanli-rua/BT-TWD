@@ -107,10 +107,13 @@ BTTWD:
       labels: ["<=300", "300-800", "800-1500", "1500-5000", ">5000"]
 
   min_bucket_size: 50                                          # 分桶停止条件之一：当前桶样本数 < min_bucket_size 时不再继续往下分
-                                                               # 本数据集不单独限制每桶正样本数，分桶只看总样本数和层数
+                                                              # 本数据集不单独限制每桶正样本数，分桶只看总样本数和层数
+  use_min_bucket_size_limit: true                              # 是否启用按最小样本数限制继续分桶
+  use_merge_small_to_residual: true # 是否将小于 min_bucket_size 的子桶合并到 residual/others（与最小样本限制解耦）
   max_levels: 4                                                 # 桶树最大层数，达到后强制停止分裂，与 gain 无关
   use_gain: true                                                # 预留参数，增益只参与弱桶判定和阈值回退，不影响是否分桶
   min_gain_for_split: -0.006                                      # 用于弱桶判定的增益阈值：增益 < 该值 的桶会被标记为弱桶，阈值/模型回退父桶/全局
+  use_gain_weak_backoff: true                                  # 是否启用基于增益判定的弱桶回退逻辑
   gamma_bucket: 0.00                                             # 多一个子桶的复杂度惩罚，类似 XGBoost 的 gamma
   bucket_subsample: 0.7                                          # 桶内随机采样比例（类似 XGBoost 的 subsample）
   max_train_samples_per_bucket: 20000                            # 每个桶最多用于训练的样本数
