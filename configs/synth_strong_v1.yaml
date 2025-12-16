@@ -70,9 +70,12 @@ BTTWD:
       bins: [-0.5, 0.5]
       labels: ["low", "mid", "high"]
   min_bucket_size: 200
+  use_min_bucket_size_limit: true
+  use_merge_small_to_residual: true # 是否将小于 min_bucket_size 的子桶合并到 residual/others（与最小样本限制解耦）
   max_levels: 2
   use_gain: false
   min_gain_for_split: 0.0
+  use_gain_weak_backoff: true
   gamma_bucket: 0.0
   bucket_subsample: 0.7
   max_train_samples_per_bucket: 30000

@@ -33,11 +33,14 @@ class BTTWDModel:
         thresh_cfg = cfg.get("THRESHOLD") or cfg.get("THRESHOLDS", {})
 
         self.min_bucket_size = bcfg.get("min_bucket_size", 50)
+        self.use_min_bucket_size_limit = bcfg.get("use_min_bucket_size_limit", True)
+        self.use_merge_small_to_residual = bcfg.get("use_merge_small_to_residual", True)
         self.min_pos_per_bucket = bcfg.get("min_pos_per_bucket", 0)
         self.max_levels = bcfg.get("max_levels", bcfg.get("max_depth", 10))
         self.min_gain_for_split = bcfg.get("min_gain_for_split", 0.0)
         self.small_bucket_threshold = bcfg.get("small_bucket_threshold", self.min_bucket_size)
         self.use_gain = bcfg.get("use_gain", True)
+        self.use_gain_weak_backoff = bcfg.get("use_gain_weak_backoff", True)
         self.gamma_bucket = bcfg.get("gamma_bucket", 0.0)
         self.parent_share_rate = bcfg.get("parent_share_rate", 0.0)
         self.min_parent_share = bcfg.get("min_parent_share", 0)
@@ -514,18 +517,43 @@ class BTTWDModel:
             values = part_series.iloc[idx_all]
             groups = {cid: idxs.to_numpy() for cid, idxs in values.groupby(values).groups.items()}
             large_values = []
+            merged_small = []
+            skipped_small = []
+            skipped_low_pos = []
             for cid, cidx in groups.items():
-                if len(cidx) < self.min_bucket_size:
+                is_small = len(cidx) < self.min_bucket_size
+                skip_for_size = self.use_min_bucket_size_limit and is_small
+                if skip_for_size:
+                    skipped_small.append(cid)
                     continue
+
                 if self.min_pos_per_bucket > 0 and np.sum(y[cidx]) < self.min_pos_per_bucket:
+                    skipped_low_pos.append(cid)
                     continue
+
+                if self.use_merge_small_to_residual and is_small:
+                    merged_small.append(cid)
+                    continue
+
                 large_values.append(cid)
 
             if len(large_values) == 0:
                 leaf_index_map[bucket_id] = idx_all
-                log_bt(
-                    f"桶 bucket_id={bucket_id} 样本不足（n={len(idx_all)} < min_bucket_size={self.min_bucket_size}），不再细分"
-                )
+                reason_parts = []
+                if self.use_min_bucket_size_limit and skipped_small:
+                    reason_parts.append(
+                        f"{len(skipped_small)} 个子桶样本数不足 min_bucket_size={self.min_bucket_size}"
+                    )
+                if self.use_merge_small_to_residual and merged_small and not skipped_small:
+                    reason_parts.append(
+                        f"{len(merged_small)} 个子桶按 use_merge_small_to_residual 合并到 residual"
+                    )
+                if skipped_low_pos:
+                    reason_parts.append(
+                        f"{len(skipped_low_pos)} 个子桶正样本不足 min_pos_per_bucket={self.min_pos_per_bucket}"
+                    )
+                reason_text = "；".join(reason_parts) or "未找到有效子桶"
+                log_bt(f"桶 bucket_id={bucket_id} 不再细分：{reason_text}")
                 continue
 
             level_name = next(iter(groups.keys())).split("=")[0] if groups else f"L{level + 1}"
@@ -860,7 +888,11 @@ class BTTWDModel:
                 gain_like = bucket_score - parent_score
 
             weak_due_to_size = len(val_idx) < self.min_val_samples_per_bucket or is_others
-            weak_due_to_gain = gain_like is not None and gain_like < self.min_gain_for_split
+            weak_due_to_gain = (
+                self.use_gain_weak_backoff
+                and gain_like is not None
+                and gain_like < self.min_gain_for_split
+            )
             status = "strong"
             if weak_due_to_size or bucket_score is None or weak_due_to_gain:
                 status = "weak"
