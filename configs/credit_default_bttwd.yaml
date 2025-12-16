@@ -7,10 +7,10 @@ DATA:
   target_col: "default payment next month"
   positive_label: 1
   negative_label: 0
-  use_kfold: false
-  split:
-    val_ratio: 0.1
-    test_ratio: 0.2
+  use_kfold: true
+  kfold:
+    n_splits: 5
+    shuffle: true
     random_state: 42
 
 PREPROCESS:
