@@ -319,9 +319,6 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
             try:
                 engine = "xlrd" if file_type == "xls" else None
                 df = pd.read_excel(raw_path, sheet_name=sheet, header=header, engine=engine)
-                df.columns = [
-                    str(c).replace("\ufeff", "").replace("\xa0", " ").strip() for c in df.columns
-                ]
             except ImportError as e:  # pragma: no cover - 依赖问题
                 raise ImportError("读取Excel失败，可能缺少xlrd>=2.0.1，请安装后重试") from e
         elif file_type in {"json", "jsonl"}:
@@ -331,6 +328,8 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
 
     if dataset_name == "telco_churn" and "TotalCharges" in df.columns:
         df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
+
+    df.columns = [str(c).replace("\ufeff", "").replace("\xa0", " ").strip() for c in df.columns]
 
     df, target_col = _apply_target_transform(df, data_cfg)
 
