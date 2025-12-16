@@ -2,12 +2,11 @@ DATA:
   dataset_name: "credit_default"
   raw_path: "../data/credit/default of credit card clients.xls"
   file_type: "xls"
-  sheet_name: 0
+  excel:
+    header: 1
   target_col: "default payment next month"
   positive_label: 1
   negative_label: 0
-
-  # ✅ 对齐 adult：使用 K 折，而不是 holdout
   use_kfold: true
   kfold:
     n_splits: 5
