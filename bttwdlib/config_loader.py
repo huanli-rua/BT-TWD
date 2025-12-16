@@ -1,6 +1,8 @@
 import os
-import yaml
+
 from .utils_logging import log_info
+
+import yaml
 
 
 def load_yaml_cfg(path: str) -> dict:

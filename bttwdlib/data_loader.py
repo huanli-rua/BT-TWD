@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 from scipy.io import arff
+from .synth_data import load_synth_strong_v1
 from .utils_logging import log_info
 
 
@@ -294,6 +295,22 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
                 data_cfg.setdefault("positive_label", "<30")
                 data_cfg.setdefault("negative_label", ">30")
                 df = _map_target_with_config(df, target_col, data_cfg, extra_mapping={"no": 0})
+                data_cfg["positive_label"] = 1
+                data_cfg.setdefault("negative_label", 0)
+                target_mapped = True
+
+            elif dataset_name_lower == "synth_strong_v1":
+                default_path = raw_path or repo_root / "data" / "synth_strong_v1.csv"
+                default_path = Path(default_path)
+                if not default_path.exists():
+                    raise FileNotFoundError(
+                        f"未找到合成数据文件 {default_path}，请先运行 scripts/generate_synth_dataset.py 生成"
+                    )
+                df = load_synth_strong_v1(default_path)
+                if not set(pd.unique(df.get("target", []))).issubset({0, 1}):
+                    raise ValueError("合成数据 target 列必须为 0/1，请检查生成流程或手动修改是否破坏标签。")
+                df["group"] = df["group"].astype(str)
+                data_cfg.setdefault("target_col", "target")
                 data_cfg["positive_label"] = 1
                 data_cfg.setdefault("negative_label", 0)
                 target_mapped = True
