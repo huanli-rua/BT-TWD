@@ -1,8 +1,9 @@
+import json
 from pathlib import Path
 
 import pandas as pd
 from scipy.io import arff
-from .synth_data import load_synth_strong_v1
+from .synth_data import load_synth_strong_v1, load_synth_strong_v2
 from .utils_logging import log_info
 
 
@@ -313,6 +314,50 @@ def load_dataset(cfg: dict) -> tuple[pd.DataFrame, str]:
                 data_cfg.setdefault("target_col", "target")
                 data_cfg["positive_label"] = 1
                 data_cfg.setdefault("negative_label", 0)
+                target_mapped = True
+
+            elif dataset_name_lower == "synth_strong_v2":
+                default_path = raw_path or repo_root / "data" / "synth_strong_v2.csv"
+                default_path = Path(default_path)
+                if not default_path.exists():
+                    raise FileNotFoundError(
+                        f"未找到合成数据文件 {default_path}，请先运行 scripts/generate_synth_dataset.py --version v2 生成"
+                    )
+                df = load_synth_strong_v2(default_path)
+                if not set(pd.unique(df.get("target", []))).issubset({0, 1}):
+                    raise ValueError("合成数据 target 列必须为 0/1，请检查生成流程或手动修改是否破坏标签。")
+                df["group"] = df["group"].astype(str)
+                data_cfg.setdefault("target_col", "target")
+                data_cfg["positive_label"] = 1
+                data_cfg.setdefault("negative_label", 0)
+                meta_path_cfg = data_cfg.get("meta_path")
+                meta_path = (
+                    Path(meta_path_cfg)
+                    if meta_path_cfg
+                    else default_path.parent / f"{default_path.stem}_meta.json"
+                )
+                if meta_path.exists():
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                    costs_from_meta = meta.get("bucket_path_cost_profile")
+                    if costs_from_meta:
+                        thr = cfg.get("THRESHOLD")
+                        thrs = cfg.get("THRESHOLDS")
+                        if isinstance(thr, dict):
+                            thr["costs_per_bucket"] = costs_from_meta
+                        elif isinstance(thrs, dict):
+                            thrs["costs_per_bucket"] = costs_from_meta
+                        else:
+                            cfg["THRESHOLD"] = {"costs_per_bucket": costs_from_meta}
+                        log_info(
+                            f"【数据加载】检测到 synth_strong_v2 元数据 {meta_path}，已注入 {len(costs_from_meta)} 条桶级 cost 配置"
+                        )
+                    else:
+                        log_info(
+                            f"【数据加载】元数据 {meta_path} 未包含 bucket_path_cost_profile，保持全局 cost"
+                        )
+                else:
+                    log_info(f"【数据加载】未找到 synth_strong_v2 meta 文件 {meta_path}，跳过桶级 cost 注入")
                 target_mapped = True
 
             else:

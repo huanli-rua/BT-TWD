@@ -1,0 +1,185 @@
+DATA:
+  dataset_name: "synth_strong_v2"
+  raw_path: "data/synth_strong_v2.csv"
+  target_col: "target"
+  positive_label: 1
+  negative_label: 0
+  file_type: "csv"
+  use_kfold: true
+  kfold:
+    n_splits: 5
+    shuffle: true
+    random_state: 42
+  split:
+    strategy: "random_stratified"
+    train_ratio: 0.6
+    val_ratio: 0.2
+    test_ratio: 0.2
+    random_state: 42
+
+PREPROCESS:
+  continuous_cols:
+    - x1
+    - x2
+    - x3
+    - x4
+    - x5
+    - x6
+    - x7
+    - x8
+    - x9
+    - x10
+    - z1
+    - z2
+    - z3
+    - z4
+    - z5
+  categorical_cols:
+    - group
+  handle_missing: "none"
+  scaler_type: "standard"
+  drop_first: true
+  save_feature_names: true
+
+SCORE:
+  bucket_score_mode: "f1_regret_bnd"
+  f1_weight: 1.0
+  regret_weight: 1.0
+  bnd_weight: 0.5
+
+BTTWD:
+  bucket_levels:
+    - level: 1
+      name: "L1_group"
+      type: "categorical_group"
+      col: "group"
+      groups:
+        - label: "A"
+          values: ["A"]
+        - label: "B"
+          values: ["B"]
+        - label: "C"
+          values: ["C"]
+        - label: "D"
+          values: ["D"]
+      other_label: "OTHER"
+
+    - level: 2
+      name: "L2_x1"
+      type: "numeric_bin"
+      col: "x1"
+      bins: [-1.2, -0.4, 0.2, 0.9]
+      labels: ["b1", "b2", "b3", "b4", "b5"]
+
+    - level: 3
+      name: "L3_x2"
+      type: "numeric_bin"
+      col: "x2"
+      bins: [-1.0, -0.2, 0.4, 1.0]
+      labels: ["b1", "b2", "b3", "b4", "b5"]
+
+    - level: 4
+      name: "L4_x3"
+      type: "numeric_bin"
+      col: "x3"
+      bins: [-1.0, -0.1, 0.6, 1.2]
+      labels: ["b1", "b2", "b3", "b4", "b5"]
+
+  min_bucket_size: 250
+  min_val_samples_per_bucket: 120
+  val_ratio: 0.3
+  max_levels: 4
+  use_gain: false
+  min_gain_for_split: 0.0
+  gamma_bucket: 0.0
+  bucket_subsample: 0.7
+  max_train_samples_per_bucket: 30000
+  parent_share_rate: 0.2
+  min_parent_share: 50
+  use_global_backoff: true
+  global_estimator: "xgb"
+  bucket_estimator: "none"
+  posterior_estimator: "logreg"
+  logreg_C: 1.0
+  knn_k: 6
+  bucket_rf:
+    n_estimators: 100
+    max_depth: null
+    random_state: 42
+    n_jobs: -1
+  bucket_xgb:
+    n_estimators: 200
+    max_depth: 3
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+  global_xgb:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+
+THRESHOLD:
+  mode: "bucket_wise"
+  objective: "regret"
+  alpha_grid: [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0]
+  beta_grid:  [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]
+  gap_min: 0.1
+  costs:
+    C_TP: 0.0
+    C_TN: 0.0
+    C_FP: 1.0
+    C_FN: 3.0
+    C_BP: 1.0
+    C_BN: 0.5
+  min_samples_for_thresholds: 100
+
+BASELINES:
+  use_logreg: true
+  use_random_forest: true
+  use_knn: true
+  use_xgboost: true
+  common:
+    threshold_mode: "search"
+    fixed_threshold: 0.3
+  logreg:
+    C: 1.0
+    max_iter: 300
+    use_custom_threshold: false
+    custom_threshold: 0.35
+  random_forest:
+    n_estimators: 200
+    max_depth: null
+    random_state: 42
+    use_custom_threshold: false
+    custom_threshold: 0.4
+  xgboost:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: -1
+    use_custom_threshold: false
+    custom_threshold: 0.35
+
+OUTPUT:
+  results_dir: "results/synth_strong_v2"
+  figs_dir: "figs"
+  save_per_fold_metrics: true
+  save_bucket_metrics: true
+  save_config_copy: true
+  save_threshold_logs: true
+  threshold_log_filename: "bucket_thresholds_per_fold.csv"
+
+SEED:
+  global_seed: 42
