@@ -83,6 +83,7 @@ class BTTWDModel:
                 "C_BN": 0.5,
             },
         )
+        self.costs_per_bucket = thresh_cfg.get("costs_per_bucket") or {}
         self.global_alpha = thresh_cfg.get("alpha_init", 0.6)
         self.global_beta = thresh_cfg.get("beta_init", 0.2)
         self.min_samples_for_thresholds = thresh_cfg.get(
@@ -105,6 +106,7 @@ class BTTWDModel:
         self.rng = np.random.default_rng(self.random_state)
         self.bucket_estimator = self._build_bucket_estimator()
         self.score_cfg = self._build_score_cfg(cfg)
+        self.bucket_specific_cost_warns = 0
 
     @classmethod
     def from_cfg(cls, cfg: dict, feature_names: list[str] | None = None, bucket_tree=None) -> "BTTWDModel":
@@ -313,19 +315,46 @@ class BTTWDModel:
                 return model, candidate
         return None, None
 
-    def _search_thresholds(self, proba: np.ndarray, y_true: np.ndarray):
+    def _get_costs_for_bucket(self, bucket_id: str | None):
+        if bucket_id is None:
+            return self.costs, False
+
+        if bucket_id in self.costs_per_bucket:
+            return self.costs_per_bucket.get(bucket_id, self.costs), True
+
+        if bucket_id.startswith("ROOT|"):
+            trimmed = bucket_id[len("ROOT|") :]
+            if trimmed in self.costs_per_bucket:
+                return self.costs_per_bucket.get(trimmed, self.costs), True
+
+        return self.costs, False
+
+    def _search_thresholds(self, proba: np.ndarray, y_true: np.ndarray, *, bucket_id: str | None = None):
         grid_alpha = self.threshold_grid_alpha or [self.global_alpha]
         grid_beta = self.threshold_grid_beta or [self.global_beta]
+
+        COST_KEYS = ("C_TP", "C_TN", "C_FP", "C_FN", "C_BP", "C_BN")
+
+        costs_raw, is_bucket_specific = self._get_costs_for_bucket(bucket_id)
+        costs_to_use = {k: float(costs_raw.get(k, self.costs.get(k))) for k in COST_KEYS}
+
+        if is_bucket_specific:
+            missing = [k for k in COST_KEYS if k not in costs_raw]
+            if missing and self.bucket_specific_cost_warns < 5:
+                log_info(
+                    f"【阈值】桶 {bucket_id} 的 bucket-specific cost 缺少 {missing}，将使用全局 cost 补齐"
+                )
+                self.bucket_specific_cost_warns += 1
 
         alpha, beta, stats = search_thresholds_with_regret(
             proba,
             y_true,
             alpha_grid=grid_alpha,
             beta_grid=grid_beta,
-            costs=self.costs,
+            costs=costs_to_use,
             gap_min=self.gap_min,
         )
-        return alpha, beta, stats
+        return alpha, beta, stats, costs_to_use, is_bucket_specific
 
     def _get_threshold_with_backoff(self, bucket_id: str):
         record = self.bucket_stats.get(bucket_id, {})
@@ -645,7 +674,13 @@ class BTTWDModel:
                 proba_val_inner = np.full(len(y_val_inner), self.global_pos_rate)
             else:
                 proba_val_inner = self.global_model.predict_proba(X_val_inner)[:, 1]
-            self.global_alpha, self.global_beta, _ = self._search_thresholds(proba_val_inner, y_val_inner)
+            (
+                self.global_alpha,
+                self.global_beta,
+                _,
+                _,
+                _,
+            ) = self._search_thresholds(proba_val_inner, y_val_inner, bucket_id="ROOT")
 
         if self.global_model is None:
             proba_all = np.full(len(y), self.global_pos_rate)
@@ -796,6 +831,8 @@ class BTTWDModel:
             bucket_score = None
             alpha = beta = None
             stats = {}
+            costs_used = self.costs
+            used_bucket_specific = False
             if enough_val:
                 if model is None:
                     if self.global_model is not None:
@@ -804,7 +841,9 @@ class BTTWDModel:
                         proba_val = np.full(len(val_idx), self.global_pos_rate)
                 else:
                     proba_val = model.predict_proba(X[val_idx])[:, 1]
-                alpha, beta, stats = self._search_thresholds(proba_val, y_val_bucket)
+                alpha, beta, stats, costs_used, used_bucket_specific = self._search_thresholds(
+                    proba_val, y_val_bucket, bucket_id=bucket_id
+                )
                 score_metrics = {
                     "regret": stats.get("regret", np.nan),
                     "bac": stats.get("bac", np.nan),
@@ -812,7 +851,6 @@ class BTTWDModel:
                     "BND_ratio": stats.get("bnd_ratio", np.nan),
                 }
                 bucket_score = compute_bucket_score(score_metrics, self.score_cfg)
-                self.bucket_thresholds[bucket_id] = (alpha, beta)
             else:
                 stats = {"regret": float("nan"), "f1": float("nan"), "precision": float("nan"), "recall": float("nan"), "bnd_ratio": float("nan"), "pos_coverage": float("nan"), "bac": float("nan"), "auc": float("nan"), "n_samples": 0}
 
@@ -856,6 +894,7 @@ class BTTWDModel:
                     "use_parent_threshold": use_parent_threshold,
                     "BAC_val": float(stats.get("bac", np.nan)),
                     "AUC_val": float(stats.get("auc", np.nan)),
+                    "cost_source": "bucket_specific" if used_bucket_specific else "global_default",
                     "score_metric": self.score_cfg.get("bucket_score_mode"),
                     "score_value": float(bucket_score) if bucket_score is not None else float("nan"),
                     "parent_score_value": float(parent_score) if parent_score is not None else float("nan"),

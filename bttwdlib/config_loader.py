@@ -2,11 +2,11 @@ import os
 
 from .utils_logging import log_info
 
-import yaml
-
 
 def load_yaml_cfg(path: str) -> dict:
     """从相对路径加载 YAML 配置。"""
+    import yaml
+
     if not os.path.exists(path):
         raise FileNotFoundError(f"配置文件不存在：{path}")
     try:
