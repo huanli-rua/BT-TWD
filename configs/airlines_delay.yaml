@@ -19,9 +19,9 @@ DATA:
   random_state: 42                                                # 随机种子
   split:                                                          # （可选）显式划分比例，供脚本自定义切分时使用
     strategy: "random_stratified"                                # 随机分层划分
-    train_ratio: 0.5                                              # 训练集比例
-    val_ratio: 0.2                                                # 验证集比例
-    test_ratio: 0.3                                               # 测试集比例
+    train_ratio: 0.6                                              # 训练集比例（val+test 保持 40%）
+    val_ratio: 0.2                                                # 验证集比例（与桶内阈值搜索一致）
+    test_ratio: 0.2                                               # 测试集比例（K=5 -> 每折测试 20%）
     random_state: 42                                              # 切分随机种子
 
 PREPROCESS:
