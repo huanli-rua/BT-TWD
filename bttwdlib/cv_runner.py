@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -189,15 +190,32 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None, bucket_tree: 
 
 
 def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tree: BucketTree | None = None) -> dict:
+    cfg = deepcopy(cfg)
     repo_root = Path(__file__).resolve().parent.parent
     configured_results_dir = cfg.get("OUTPUT", {}).get("results_dir", "results")
     results_dir = Path(configured_results_dir)
     if not results_dir.is_absolute():
         results_dir = repo_root / results_dir
     os.makedirs(results_dir, exist_ok=True)
-    n_splits = cfg.get("DATA", {}).get("n_splits", 5)
-    shuffle = cfg.get("DATA", {}).get("shuffle", True)
-    random_state = cfg.get("DATA", {}).get("random_state", 42)
+
+    split_cfg = cfg.get("DATA", {}).get("split", {})
+    val_ratio_override = split_cfg.get("val_ratio")
+    test_ratio_cfg = split_cfg.get("test_ratio")
+
+    if val_ratio_override is not None:
+        bttwd_cfg = cfg.setdefault("BTTWD", {})
+        bttwd_cfg["val_ratio"] = val_ratio_override
+
+    data_cfg = cfg.get("DATA", {})
+    n_splits = data_cfg.get("n_splits", 5)
+    if test_ratio_cfg is not None:
+        n_splits_from_ratio = int(round(1.0 / test_ratio_cfg)) if test_ratio_cfg > 0 else 0
+        if n_splits_from_ratio <= 0 or not np.isclose(test_ratio_cfg, 1.0 / n_splits_from_ratio, rtol=1e-3):
+            raise ValueError("DATA.split.test_ratio 必须是 1/k 的形式，便于对齐 K 折测试集比例")
+        n_splits = n_splits_from_ratio
+
+    shuffle = data_cfg.get("shuffle", True)
+    random_state = data_cfg.get("random_state", 42)
     skf = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
 
     per_fold_records = []

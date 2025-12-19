@@ -24,6 +24,11 @@ DATA:
   shuffle: true                                                     # K 折是否洗牌
   stratify: true                                                    # K 折是否分层
   random_state: 42                                                  # 随机种子
+  split:                                                            # 显式划分比例，供 K 折/holdout 读取
+    strategy: "random_stratified"                                   # 分层随机划分
+    val_ratio: 0.2                                                  # 验证集占比（与桶内阈值搜索一致）
+    test_ratio: 0.2                                                 # 测试集占比（K=5 -> 每折测试 20%）
+    random_state: 42                                                # 切分随机种子
 
 PREPROCESS:
   continuous_cols: null                                             # 数值特征列表（null 表示自动识别非类别列）
