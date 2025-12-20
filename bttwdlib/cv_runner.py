@@ -307,29 +307,28 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
                     s3_metrics = {}
                     regret_val = float("nan")
 
-                if len(idx_list) > 0:
-                    bucket_test_gain_records.append(
-                        {
-                            "fold": fold_idx,
-                            "bucket_id": bucket_id,
-                            "parent_id": meta.get("parent_bucket_id", ""),
-                            "level": 0 if bucket_id == "ROOT" else len(str(bucket_id).split("|")),
-                            "n_train": meta.get("n_train", 0),
-                            "n_val": meta.get("n_val", 0),
-                            "n_test": len(idx_list),
-                            "BAC": s3_metrics.get("BAC"),
-                            "F1": s3_metrics.get("F1"),
-                            "AUC": s3_metrics.get("AUC"),
-                            "Regret": regret_val,
-                            "BND_ratio": s3_metrics.get("BND_ratio"),
-                            "POS_coverage": s3_metrics.get("POS_Coverage"),
-                            "is_weak": meta.get("is_weak", False),
-                            "threshold_source_bucket": meta.get("threshold_source_bucket")
-                            or meta.get("parent_with_threshold")
-                            or bucket_id,
-                            "threshold_used": _format_threshold_value(meta.get("alpha"), meta.get("beta")),
-                        }
-                    )
+                bucket_test_gain_records.append(
+                    {
+                        "fold": fold_idx,
+                        "bucket_id": bucket_id,
+                        "parent_id": meta.get("parent_bucket_id", ""),
+                        "level": 0 if bucket_id == "ROOT" else len(str(bucket_id).split("|")),
+                        "n_train": meta.get("n_train", 0),
+                        "n_val": meta.get("n_val", 0),
+                        "n_test": len(idx_list),
+                        "BAC": s3_metrics.get("BAC"),
+                        "F1": s3_metrics.get("F1"),
+                        "AUC": s3_metrics.get("AUC"),
+                        "Regret": regret_val,
+                        "BND_ratio": s3_metrics.get("BND_ratio"),
+                        "POS_coverage": s3_metrics.get("POS_Coverage"),
+                        "is_weak": meta.get("is_weak", False),
+                        "threshold_source_bucket": meta.get("threshold_source_bucket")
+                        or meta.get("parent_with_threshold")
+                        or bucket_id,
+                        "threshold_used": _format_threshold_value(meta.get("alpha"), meta.get("beta")),
+                    }
+                )
 
             test_bucket_records = []
             for bucket_id, idxs in test_bucket_ids.groupby(test_bucket_ids).groups.items():
@@ -535,52 +534,5 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
         remaining_cols = [c for c in bucket_test_df.columns if c not in existing_cols]
         bucket_test_df = bucket_test_df[existing_cols + remaining_cols]
         bucket_test_df.to_csv(Path(results_dir) / "bucket_metrics_gain_test_per_fold.csv", index=False)
-        # 聚合每个桶在所有折的测试集指标（仅保留有测试样本的折）
-        agg_df = bucket_test_df[bucket_test_df["n_test"] > 0]
-        metric_cols = ["BAC", "F1", "AUC", "Regret", "BND_ratio", "POS_coverage"]
-        agg_parts = []
-        for bucket_id, group in agg_df.groupby("bucket_id"):
-            record = {"bucket_id": bucket_id}
-            for col in metric_cols:
-                if col in group:
-                    record[f"{col}_mean"] = group[col].mean()
-                    record[f"{col}_std"] = group[col].std()
-            # 基线桶级指标
-            baseline_map = {
-                "baseline_bac": "baseline_bac",
-                "baseline_recall": "baseline_recall",
-                "baseline_precision": "baseline_precision",
-                "baseline_f1": "baseline_f1",
-                "baseline_auc": "baseline_auc",
-                "baseline_regret": "baseline_regret",
-                "baseline_bnd_ratio": "baseline_bnd_ratio",
-                "baseline_pos_coverage": "baseline_pos_coverage",
-            }
-            for src_col, base_key in baseline_map.items():
-                if src_col in group:
-                    record[f"{base_key}_mean"] = group[src_col].mean()
-                    record[f"{base_key}_std"] = group[src_col].std()
-            agg_parts.append(record)
-
-        if agg_parts:
-            agg_out = pd.DataFrame(agg_parts)
-            ordered_summary_cols = ["bucket_id"]
-            for col in metric_cols:
-                ordered_summary_cols.extend([f"{col}_mean", f"{col}_std"])
-            for base_key in [
-                "baseline_precision",
-                "baseline_recall",
-                "baseline_f1",
-                "baseline_bac",
-                "baseline_auc",
-                "baseline_regret",
-                "baseline_bnd_ratio",
-                "baseline_pos_coverage",
-            ]:
-                ordered_summary_cols.extend([f"{base_key}_mean", f"{base_key}_std"])
-            existing_summary_cols = [c for c in ordered_summary_cols if c in agg_out.columns]
-            remaining_summary_cols = [c for c in agg_out.columns if c not in existing_summary_cols]
-            agg_out = agg_out[existing_summary_cols + remaining_summary_cols]
-            agg_out.to_csv(Path(results_dir) / "bucket_metrics_gain_test_summary.csv", index=False)
 
     return {"baselines": baseline_results, "bttwd": {"per_fold": per_fold_records, "summary": summary_rows}}
