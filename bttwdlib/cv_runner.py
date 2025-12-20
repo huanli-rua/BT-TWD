@@ -293,6 +293,26 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             default_metrics = ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa"]
             merged_metrics = list(dict.fromkeys((metrics_cfg.get("use_metrics") or []) + default_metrics))
             metrics_cfg["use_metrics"] = merged_metrics
+
+            baseline_metrics = run_baseline_bucket_evaluation(
+                X=X_train,
+                y=y_train,
+                bucket_df_for_split=X_df_train,
+                bucket_tree=bttwd_model.bucket_tree,
+                cfg=cfg,
+                results_dir=results_dir,
+                pre_split_data={
+                    "X_train": X_train,
+                    "y_train": y_train,
+                    "bucket_train": X_df_train,
+                    "X_test": X_test,
+                    "y_test": y_test,
+                    "bucket_test": X_df_test,
+                },
+                write_outputs=False,
+            )
+            baseline_map = {rec.get("bucket_id"): rec for rec in baseline_metrics}
+
             for bucket_id, meta in bucket_meta.items():
                 idx_list = list(bucket_groups.get(bucket_id, []))
                 if idx_list:
@@ -307,6 +327,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
                     s3_metrics = {}
                     regret_val = float("nan")
 
+                baseline_rec = baseline_map.get(bucket_id, {})
                 bucket_test_gain_records.append(
                     {
                         "fold": fold_idx,
@@ -327,6 +348,16 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
                         or meta.get("parent_with_threshold")
                         or bucket_id,
                         "threshold_used": _format_threshold_value(meta.get("alpha"), meta.get("beta")),
+                        "baseline_precision": baseline_rec.get("Precision"),
+                        "baseline_recall": baseline_rec.get("Recall"),
+                        "baseline_f1": baseline_rec.get("F1"),
+                        "baseline_bac": baseline_rec.get("BAC"),
+                        "baseline_auc": baseline_rec.get("AUC"),
+                        "baseline_mcc": baseline_rec.get("MCC"),
+                        "baseline_kappa": baseline_rec.get("Kappa"),
+                        "baseline_regret": baseline_rec.get("Regret"),
+                        "baseline_bnd_ratio": baseline_rec.get("BND_ratio"),
+                        "baseline_pos_coverage": baseline_rec.get("POS_Coverage"),
                     }
                 )
 
@@ -456,52 +487,8 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
         pd.DataFrame(overview_records).to_csv(os.path.join(results_dir, "metrics_overview.csv"), index=False)
     log_info("【K折实验】所有结果已写入 results 目录")
 
-    bucket_tree_for_baseline = model.bucket_tree if model is not None else None
-
-    run_baseline_bucket_evaluation(
-        X=X,
-        y=y,
-        bucket_df_for_split=X_df_for_bucket,
-        bucket_tree=bucket_tree_for_baseline,
-        cfg=cfg,
-        results_dir=results_dir,
-    )
-
     if bucket_test_gain_records:
         bucket_test_df = pd.DataFrame(bucket_test_gain_records)
-        baseline_path = Path(results_dir) / "baseline_bucket_metrics.csv"
-        if baseline_path.exists():
-            baseline_df = pd.read_csv(baseline_path)
-            baseline_merge = baseline_df[
-                [
-                    "bucket_id",
-                    "Precision",
-                    "Recall",
-                    "F1",
-                    "BAC",
-                    "AUC",
-                    "MCC",
-                    "Kappa",
-                    "Regret",
-                    "BND_ratio",
-                    "POS_Coverage",
-                ]
-            ].rename(
-                columns={
-                    "Precision": "baseline_precision",
-                    "Recall": "baseline_recall",
-                    "F1": "baseline_f1",
-                    "BAC": "baseline_bac",
-                    "AUC": "baseline_auc",
-                    "MCC": "baseline_mcc",
-                    "Kappa": "baseline_kappa",
-                    "Regret": "baseline_regret",
-                    "BND_ratio": "baseline_bnd_ratio",
-                    "POS_Coverage": "baseline_pos_coverage",
-                }
-            )
-            bucket_test_df = bucket_test_df.merge(baseline_merge, on="bucket_id", how="left")
-
         ordered_cols = [
             "fold",
             "bucket_id",
