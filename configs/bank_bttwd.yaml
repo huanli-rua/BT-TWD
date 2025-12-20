@@ -145,7 +145,7 @@ THRESHOLDS:
 
 BASELINES:
   use_logreg: true                        # 是否训练逻辑回归 baseline
-  use_random_forest: false                # 是否训练随机森林 baseline
+  use_random_forest: true                # 是否训练随机森林 baseline
   use_knn: true                          # 是否训练 KNN baseline
   use_xgboost: true                       # 是否训练 XGBoost baseline
 
