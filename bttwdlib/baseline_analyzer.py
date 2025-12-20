@@ -38,6 +38,8 @@ def run_baseline_bucket_evaluation(
     bucket_tree,
     cfg,
     results_dir,
+    pre_split_data: dict | None = None,
+    write_outputs: bool = True,
 ):
     bttwd_cfg = cfg.get("BTTWD", {})
     data_cfg = cfg.get("DATA", {})
@@ -53,16 +55,24 @@ def run_baseline_bucket_evaluation(
     if isinstance(stratify_flag, str):
         stratify_flag = stratify_flag.strip().lower() in {"1", "true", "yes", "y"}
 
-    # 切分数据集
-    stratify_y = y if stratify_flag else None
-    X_train_full, X_test, y_train_full, y_test, bucket_train_full, bucket_test = train_test_split(
-        X,
-        y,
-        bucket_df_for_split,
-        test_size=test_ratio,
-        random_state=random_state,
-        stratify=stratify_y,
-    )
+    if pre_split_data is not None:
+        X_train_full = pre_split_data["X_train"]
+        y_train_full = pre_split_data["y_train"]
+        bucket_train_full = pre_split_data["bucket_train"]
+        X_test = pre_split_data["X_test"]
+        y_test = pre_split_data["y_test"]
+        bucket_test = pre_split_data["bucket_test"]
+    else:
+        # 切分数据集
+        stratify_y = y if stratify_flag else None
+        X_train_full, X_test, y_train_full, y_test, bucket_train_full, bucket_test = train_test_split(
+            X,
+            y,
+            bucket_df_for_split,
+            test_size=test_ratio,
+            random_state=random_state,
+            stratify=stratify_y,
+        )
     stratify_y_train = y_train_full if stratify_flag else None
     X_train, X_val, y_train, y_val, bucket_train, bucket_val = train_test_split(
         X_train_full,
@@ -137,8 +147,7 @@ def run_baseline_bucket_evaluation(
             )
         )
 
-    results_path = _prepare_results_dir(results_dir)
-    baseline_path = results_path / "baseline_bucket_metrics.csv"
+    results_path = _prepare_results_dir(results_dir) if write_outputs else Path(results_dir)
     baseline_df = pd.DataFrame(bucket_metrics)
     if baseline_df.empty:
         baseline_df = pd.DataFrame(
@@ -159,48 +168,50 @@ def run_baseline_bucket_evaluation(
                 "beta",
             ]
         )
-    baseline_df.to_csv(baseline_path, index=False)
-    log_info("[BASELINE] baseline_bucket_metrics.csv 写出完成")
+    if write_outputs:
+        baseline_path = results_path / "baseline_bucket_metrics.csv"
+        baseline_df.to_csv(baseline_path, index=False)
+        log_info("[BASELINE] baseline_bucket_metrics.csv 写出完成")
 
-    # 合并到 bucket_metrics_gain.csv
-    gain_path = results_path / "bucket_metrics_gain.csv"
-    if gain_path.exists():
-        gain_df = pd.read_csv(gain_path)
-    else:
-        gain_df = pd.DataFrame(columns=["bucket_id"])
+    if write_outputs:
+        # 合并到 bucket_metrics_gain.csv
+        gain_path = results_path / "bucket_metrics_gain.csv"
+        if gain_path.exists():
+            gain_df = pd.read_csv(gain_path)
+        else:
+            gain_df = pd.DataFrame(columns=["bucket_id"])
 
-    baseline_merge = baseline_df[
-        [
-            "bucket_id",
-            "Precision",
-            "Recall",
-            "F1",
-            "BAC",
-            "AUC",
-            "MCC",
-            "Kappa",
-            "Regret",
-            "BND_ratio",
-            "POS_Coverage",
-        ]
-    ].rename(
-        columns={
-            "Precision": "baseline_precision",
-            "Recall": "baseline_recall",
-            "F1": "baseline_f1",
-            "BAC": "baseline_bac",
-            "AUC": "baseline_auc",
-            "MCC": "baseline_mcc",
-            "Kappa": "baseline_kappa",
-            "Regret": "baseline_regret",
-            "BND_ratio": "baseline_bnd_ratio",
-            "POS_Coverage": "baseline_pos_coverage",
-        }
-    )
+        baseline_merge = baseline_df[
+            [
+                "bucket_id",
+                "Precision",
+                "Recall",
+                "F1",
+                "BAC",
+                "AUC",
+                "MCC",
+                "Kappa",
+                "Regret",
+                "BND_ratio",
+                "POS_Coverage",
+            ]
+        ].rename(
+            columns={
+                "Precision": "baseline_precision",
+                "Recall": "baseline_recall",
+                "F1": "baseline_f1",
+                "BAC": "baseline_bac",
+                "AUC": "baseline_auc",
+                "MCC": "baseline_mcc",
+                "Kappa": "baseline_kappa",
+                "Regret": "baseline_regret",
+                "BND_ratio": "baseline_bnd_ratio",
+                "POS_Coverage": "baseline_pos_coverage",
+            }
+        )
 
-    merged_df = gain_df.merge(baseline_merge, on="bucket_id", how="left")
-    merged_df.to_csv(gain_path, index=False)
-    log_info("[BASELINE] baseline 指标成功合并到 bucket_metrics_gain.csv")
+        merged_df = gain_df.merge(baseline_merge, on="bucket_id", how="left")
+        merged_df.to_csv(gain_path, index=False)
+        log_info("[BASELINE] baseline 指标成功合并到 bucket_metrics_gain.csv")
 
     return bucket_metrics
-
