@@ -115,12 +115,12 @@ BTTWD:
         - label: "OtherDisp"
           values: ["Other", "Missing", 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
 
-    - level: 4
-      name: "L4_num_diagnoses"
-      type: "numeric_bin"
-      col: "number_diagnoses"
-      bins: [3, 6]
-      labels: ["low_dx", "mid_dx", "high_dx"]
+    # - level: 4
+    #   name: "L4_num_diagnoses"
+    #   type: "numeric_bin"
+    #   col: "number_diagnoses"
+    #   bins: [3, 6]
+    #   labels: ["low_dx", "mid_dx", "high_dx"]
 
   min_bucket_size: 200
   use_min_bucket_size_limit: true

@@ -85,19 +85,19 @@ BTTWD:
       bins: [40, 70]
       labels: ["hum_low", "hum_mid", "hum_high"]
 
-    - level: 4
-      name: "L4_cloud3pm"
-      type: "numeric_bin"
-      col: "Cloud3pm"
-      bins: [3, 7]
-      labels: ["cloud_low", "cloud_mid", "cloud_high"]
+    # - level: 4
+    #   name: "L4_cloud3pm"
+    #   type: "numeric_bin"
+    #   col: "Cloud3pm"
+    #   bins: [3, 7]
+    #   labels: ["cloud_low", "cloud_mid", "cloud_high"]
 
-    - level: 5
-      name: "L5_sunshine"
-      type: "numeric_bin"
-      col: "Sunshine"
-      bins: [3, 8]
-      labels: ["sun_low", "sun_mid", "sun_high"]
+    # - level: 5
+    #   name: "L5_sunshine"
+    #   type: "numeric_bin"
+    #   col: "Sunshine"
+    #   bins: [3, 8]
+    #   labels: ["sun_low", "sun_mid", "sun_high"]
 
   min_bucket_size: 300
   use_min_bucket_size_limit: true
