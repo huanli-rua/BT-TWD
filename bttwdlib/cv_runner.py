@@ -287,7 +287,8 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
         per_fold_records.append(fold_record)
         bucket_df = bttwd_model.get_bucket_stats()
         if not bucket_df.empty:
-            test_bucket_ids = bttwd_model.bucket_tree.assign_buckets(X_df_test)
+            test_bucket_parts = bttwd_model.bucket_tree.assign_bucket_parts(X_df_test)
+            test_bucket_ids = bttwd_model._route_bucket_ids(test_bucket_parts)
             bucket_meta = bucket_df.set_index("bucket_id").to_dict("index")
             bucket_groups = test_bucket_ids.groupby(test_bucket_ids).groups
             metrics_cfg = deepcopy(cfg.get("METRICS", {}))
@@ -391,7 +392,9 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             bucket_metrics_records.append(bucket_df)
 
             # 逐样本预测记录：包含桶ID、阈值来源与预测结果，便于对齐排查。
-            threshold_cache = {bid: bttwd_model._get_threshold_with_backoff(bid) for bid in bucket_meta.keys()}
+            threshold_cache = {
+                bid: bttwd_model._get_threshold_with_backoff(bid) for bid in pd.unique(test_bucket_ids)
+            }
             for local_idx, bucket_id in enumerate(test_bucket_ids.tolist()):
                 alpha_beta, threshold_source = threshold_cache.get(
                     bucket_id, ((float("nan"), float("nan")), "ROOT")
