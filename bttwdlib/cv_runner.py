@@ -236,6 +236,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
     threshold_log_records = []
     threshold_costs = (cfg.get("THRESHOLD") or cfg.get("THRESHOLDS", {})).get("costs", {})
     bucket_test_gain_records = []
+    per_sample_test_records = []
 
     # 运行基线整体（使用 cross_val_predict）
     baseline_results = {}
@@ -284,9 +285,9 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             if k not in fold_record:
                 fold_record[k] = v
         per_fold_records.append(fold_record)
+        test_bucket_ids = bttwd_model.bucket_tree.assign_buckets(X_df_test)
         bucket_df = bttwd_model.get_bucket_stats()
         if not bucket_df.empty:
-            test_bucket_ids = bttwd_model.bucket_tree.assign_buckets(X_df_test)
             bucket_meta = bucket_df.set_index("bucket_id").to_dict("index")
             bucket_groups = test_bucket_ids.groupby(test_bucket_ids).groups
             metrics_cfg = deepcopy(cfg.get("METRICS", {}))
@@ -388,6 +389,26 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
                 bucket_df["regret_test"] = np.nan
             bucket_df["fold"] = fold_idx
             bucket_metrics_records.append(bucket_df)
+
+        # 逐样本预测记录：包含桶ID、阈值来源与预测结果，便于对齐排查。
+        threshold_cache = {bid: bttwd_model._get_threshold_with_backoff(bid) for bid in set(test_bucket_ids.tolist())}
+        for local_idx, bucket_id in enumerate(test_bucket_ids.tolist()):
+            alpha_beta, threshold_source = threshold_cache.get(bucket_id, ((float("nan"), float("nan")), "ROOT"))
+            global_idx = int(test_idx[local_idx])
+            per_sample_test_records.append(
+                {
+                    "fold": fold_idx,
+                    "global_index": global_idx,
+                    "bucket_id": bucket_id,
+                    "threshold_source_bucket": threshold_source,
+                    "alpha_used": float(alpha_beta[0]) if alpha_beta else float("nan"),
+                    "beta_used": float(alpha_beta[1]) if alpha_beta else float("nan"),
+                    "y_true": int(y_test[local_idx]),
+                    "y_score": float(y_score[local_idx]),
+                    "y_pred_s3": int(y_pred_s3[local_idx]),
+                    "y_pred_binary": int(y_pred_binary[local_idx]),
+                }
+            )
 
         th_logs = bttwd_model.get_threshold_logs()
         if not th_logs.empty:
@@ -521,5 +542,9 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
         remaining_cols = [c for c in bucket_test_df.columns if c not in existing_cols]
         bucket_test_df = bucket_test_df[existing_cols + remaining_cols]
         bucket_test_df.to_csv(Path(results_dir) / "bucket_metrics_gain_test_per_fold.csv", index=False)
+
+    if per_sample_test_records:
+        per_sample_df = pd.DataFrame(per_sample_test_records)
+        per_sample_df.to_csv(Path(results_dir) / "per_sample_test_predictions.csv", index=False)
 
     return {"baselines": baseline_results, "bttwd": {"per_fold": per_fold_records, "summary": summary_rows}}
