@@ -285,7 +285,11 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             if k not in fold_record:
                 fold_record[k] = v
         per_fold_records.append(fold_record)
-        test_bucket_ids = bttwd_model.bucket_tree.assign_buckets(X_df_test)
+        bucket_levels = getattr(bttwd_model.bucket_tree, "levels_cfg", []) or []
+        if bucket_levels:
+            test_bucket_ids = bttwd_model.bucket_tree.assign_buckets(X_df_test)
+        else:
+            test_bucket_ids = pd.Series(["ROOT"] * len(X_df_test), dtype="string")
         bucket_df = bttwd_model.get_bucket_stats()
         if not bucket_df.empty:
             bucket_meta = bucket_df.set_index("bucket_id").to_dict("index")
