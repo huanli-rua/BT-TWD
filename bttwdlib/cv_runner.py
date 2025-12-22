@@ -69,6 +69,28 @@ def _format_threshold_value(alpha, beta) -> str:
         return f"{alpha},{beta}"
 
 
+def _summarize_test_buckets(bucket_ids: pd.Series, y_true: np.ndarray, y_pred_s3: np.ndarray, costs: dict) -> pd.DataFrame:
+    """Aggregate test-set statistics per bucket."""
+
+    records = []
+    for bucket_id, idxs in bucket_ids.groupby(bucket_ids).groups.items():
+        idx_list = list(idxs)
+        y_true_bucket = y_true[idx_list]
+        y_pred_bucket = y_pred_s3[idx_list]
+        records.append(
+            {
+                "bucket_id": bucket_id,
+                "n_test": len(idx_list),
+                "pos_rate_test": float(np.mean(y_true_bucket)) if len(idx_list) else np.nan,
+                "BND_ratio_test": float(np.mean(np.isin(y_pred_bucket, [-1, "BND"]))),
+                "POS_Coverage_test": float(np.mean(np.array(y_pred_bucket) == 1)),
+                "regret_test": compute_regret(y_true_bucket, y_pred_bucket, costs),
+            }
+        )
+
+    return pd.DataFrame(records)
+
+
 def _build_baseline_estimator(model_key: str, cfg: dict):
     base_cfg = cfg.get("BASELINES", {})
     if model_key == "logreg":
@@ -189,6 +211,12 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None, bucket_tree: 
 
     log_info("【测试集指标-S3】" + ", ".join([f"{k}={v:.4f}" for k, v in metrics_s3.items()]))
     log_info("【测试集指标-二分类】" + ", ".join([f"{k}={v:.4f}" for k, v in metrics_binary.items()]))
+
+    test_bucket_ids = model.bucket_tree.assign_buckets(bucket_test)
+    test_bucket_df = _summarize_test_buckets(test_bucket_ids, y_test, y_pred_s3, costs)
+    if not test_bucket_df.empty:
+        model.update_test_stats(test_bucket_df)
+        model._export_bucket_reports()
 
     run_baseline_bucket_evaluation(
         X=X,
@@ -362,24 +390,10 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
                     }
                 )
 
-            test_bucket_records = []
-            for bucket_id, idxs in test_bucket_ids.groupby(test_bucket_ids).groups.items():
-                idx_list = list(idxs)
-                y_true_bucket = y_test[idx_list]
-                y_pred_bucket = y_pred_s3[idx_list]
-                test_bucket_records.append(
-                    {
-                        "bucket_id": bucket_id,
-                        "n_test": len(idx_list),
-                        "pos_rate_test": float(np.mean(y_true_bucket)) if len(idx_list) else np.nan,
-                        "BND_ratio_test": float(np.mean(np.isin(y_pred_bucket, [-1, "BND"]))),
-                        "POS_Coverage_test": float(np.mean(np.array(y_pred_bucket) == 1)),
-                        "regret_test": compute_regret(y_true_bucket, y_pred_bucket, threshold_costs),
-                    }
-                )
-
-            test_bucket_df = pd.DataFrame(test_bucket_records)
+            test_bucket_df = _summarize_test_buckets(test_bucket_ids, y_test, y_pred_s3, threshold_costs)
             if not test_bucket_df.empty:
+                bttwd_model.update_test_stats(test_bucket_df)
+                bttwd_model._export_bucket_reports()
                 bucket_df = bucket_df.merge(test_bucket_df, on="bucket_id", how="left")
             else:
                 bucket_df["n_test"] = np.nan
@@ -476,6 +490,12 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             res["fold"] = "test"
             baseline_holdout_results[base_key] = res
             per_fold_records.append(res)
+
+        test_bucket_ids_final = bttwd_final.bucket_tree.assign_buckets(bucket_df_test)
+        test_bucket_df_final = _summarize_test_buckets(test_bucket_ids_final, y_test, y_pred_final, threshold_costs)
+        if not test_bucket_df_final.empty:
+            bttwd_final.update_test_stats(test_bucket_df_final)
+            bttwd_final._export_bucket_reports()
 
     summary_df = pd.DataFrame(summary_rows)
     per_fold_output_df = pd.DataFrame(per_fold_records)
