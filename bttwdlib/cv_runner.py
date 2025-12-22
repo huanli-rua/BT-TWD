@@ -1,4 +1,6 @@
 import os
+import resource
+import time
 from copy import deepcopy
 from pathlib import Path
 import pandas as pd
@@ -34,6 +36,11 @@ from .metrics import (
 from .threshold_search import compute_regret
 from .utils_logging import log_info
 
+try:
+    import psutil
+except ImportError:  # pragma: no cover - psutil 是可选依赖，缺失时退回 resource
+    psutil = None
+
 
 def _select_baselines(cfg: dict) -> set[str]:
     """根据配置确定需要运行的基线模型集合。"""
@@ -67,6 +74,53 @@ def _format_threshold_value(alpha, beta) -> str:
         return f"alpha={float(alpha):.6f},beta={float(beta):.6f}"
     except Exception:
         return f"{alpha},{beta}"
+
+
+def _measure_training_resources(train_callable):
+    """评估单次训练的耗时与内存峰值。"""
+
+    process = psutil.Process(os.getpid()) if psutil else None
+    start_ru_maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    start_time = time.perf_counter()
+    result = train_callable()
+    elapsed = time.perf_counter() - start_time
+    end_ru_maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+    mem_candidates = []
+    if process:
+        try:
+            info = process.memory_info()
+            mem_candidates.append(info.rss)
+            mem_candidates.append(getattr(info, "vms", 0))
+        except Exception:
+            pass
+        try:
+            full_info = process.memory_full_info()
+            for attr in ("rss", "peak_rss", "peak_wset"):
+                mem_candidates.append(getattr(full_info, attr, 0))
+        except Exception:
+            pass
+
+    # ru_maxrss 以 KiB 计量（Linux），加上起始/结束值作为兜底。
+    mem_candidates.append(start_ru_maxrss * 1024)
+    mem_candidates.append(end_ru_maxrss * 1024)
+    peak_bytes = max([m for m in mem_candidates if m], default=0)
+    backend = "psutil" if psutil else "resource"
+    return elapsed, peak_bytes / (1024 * 1024), backend, result
+
+
+def _log_training_resources(cfg: dict, elapsed: float, mem_mb: float, backend: str, context: str) -> None:
+    """将资源评估结果用中文输出，关注当前配置。"""
+
+    bcfg = cfg.get("BTTWD", {})
+    parent_share = "开启" if bcfg.get("use_parent_share_rate", True) else "关闭"
+    min_sample_limit = "开启" if bcfg.get("use_min_bucket_size_limit", True) else "关闭"
+    fallback = "开启" if bcfg.get("use_global_backoff", True) else "关闭"
+    backend_note = "" if backend == "psutil" else "（psutil 未安装，使用 resource 估算）"
+    log_info(
+        f"【资源评估-{context}】当前配置：父桶贡献={parent_share}，最小样本限制={min_sample_limit}，"
+        f"回退机制={fallback}；训练耗时={elapsed:.3f} 秒，最大内存占用≈{mem_mb:.2f} MB{backend_note}"
+    )
 
 
 def _summarize_test_buckets(bucket_ids: pd.Series, y_true: np.ndarray, y_pred_s3: np.ndarray, costs: dict) -> pd.DataFrame:
@@ -198,7 +252,8 @@ def run_holdout_experiment(X, y, bucket_df, cfg, bucket_cols=None, bucket_tree: 
 
     bucket_cols = bucket_cols or bucket_df.columns.tolist()
     model = BTTWDModel.from_cfg(cfg, feature_names=bucket_cols)
-    model.fit(X_train, y_train, bucket_train)
+    elapsed, mem_mb, backend, _ = _measure_training_resources(lambda: model.fit(X_train, y_train, bucket_train))
+    _log_training_resources(cfg, elapsed, mem_mb, backend, context="Holdout")
 
     y_score = model.predict_proba(X_test, bucket_test)
     y_pred_s3 = model.predict(X_test, bucket_test)
@@ -291,7 +346,8 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
         X_df_test = X_df_for_bucket.iloc[test_idx].reset_index(drop=True)
 
         bttwd_model = BTTWDModel.from_cfg(cfg, feature_names=X_df_for_bucket.columns.tolist())
-        bttwd_model.fit(X_train, y_train, X_df_train)
+        elapsed, mem_mb, backend, _ = _measure_training_resources(lambda: bttwd_model.fit(X_train, y_train, X_df_train))
+        _log_training_resources(cfg, elapsed, mem_mb, backend, context=f"K折第{fold_idx}折")
 
         model = bttwd_model
 
@@ -463,7 +519,10 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             f"【Holdout】检测到外部测试集，训练集 n={len(X)}, 测试集 n={len(X_test)}，开始全量训练后评估"
         )
         bttwd_final = BTTWDModel.from_cfg(cfg, feature_names=X_df_for_bucket.columns.tolist())
-        bttwd_final.fit(X, y, X_df_for_bucket.reset_index(drop=True))
+        elapsed, mem_mb, backend, _ = _measure_training_resources(
+            lambda: bttwd_final.fit(X, y, X_df_for_bucket.reset_index(drop=True))
+        )
+        _log_training_resources(cfg, elapsed, mem_mb, backend, context="Holdout-外部测试集")
         y_score_final = bttwd_final.predict_proba(X_test, bucket_df_test)
         y_pred_final = bttwd_final.predict(X_test, bucket_df_test)
         if threshold_costs:
