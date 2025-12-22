@@ -90,6 +90,7 @@ BTTWD:
   gamma_bucket: 0.000
   bucket_subsample: 0.7
   max_train_samples_per_bucket: 20000
+  use_parent_share_rate: true
   parent_share_rate: 0.2
   min_parent_share: 50
   val_ratio: 0.3
