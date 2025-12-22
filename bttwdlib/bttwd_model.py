@@ -42,6 +42,7 @@ class BTTWDModel:
         self.use_gain = bcfg.get("use_gain", True)
         self.use_gain_weak_backoff = bcfg.get("use_gain_weak_backoff", True)
         self.gamma_bucket = bcfg.get("gamma_bucket", 0.0)
+        self.use_parent_share_rate = bcfg.get("use_parent_share_rate", True)
         self.parent_share_rate = bcfg.get("parent_share_rate", 0.0)
         self.min_parent_share = bcfg.get("min_parent_share", 0)
         self.val_ratio = bcfg.get("val_ratio", 0.2)
@@ -756,28 +757,46 @@ class BTTWDModel:
         parent_train_map = defaultdict(list)
         parent_val_map = defaultdict(list)
         for parent_id, child_ids in children_map.items():
-            for child_id in child_ids:
-                child_train = bucket_data[child_id]["train"]
-                child_val = bucket_data[child_id]["val"]
-
-                share_rate = 1.0 if len(child_train) <= self.small_bucket_threshold else self.parent_share_rate
-                n_share_train = min(len(child_train), int(len(child_train) * share_rate))
-                if n_share_train > 0:
-                    share_idx = self.rng.choice(child_train, size=n_share_train, replace=False)
-                    parent_train_map[parent_id].extend(share_idx.tolist())
-
-                share_rate_val = 1.0 if len(child_val) <= self.small_bucket_threshold else self.parent_share_rate
-                n_share_val = min(len(child_val), int(len(child_val) * share_rate_val))
-                if n_share_val > 0:
-                    share_val_idx = self.rng.choice(child_val, size=n_share_val, replace=False)
-                    parent_val_map[parent_id].extend(share_val_idx.tolist())
-
-            if len(parent_train_map[parent_id]) < self.min_parent_share:
-                all_child_train = np.concatenate([bucket_data[c]["train"] for c in child_ids]) if child_ids else np.array([], dtype=int)
+            if not self.use_parent_share_rate:
+                all_child_train = (
+                    np.concatenate([bucket_data[c]["train"] for c in child_ids]) if child_ids else np.array([], dtype=int)
+                )
+                all_child_val = (
+                    np.concatenate([bucket_data[c]["val"] for c in child_ids]) if child_ids else np.array([], dtype=int)
+                )
                 parent_train_map[parent_id] = all_child_train.tolist()
-            if len(parent_val_map[parent_id]) < self.min_parent_share:
-                all_child_val = np.concatenate([bucket_data[c]["val"] for c in child_ids]) if child_ids else np.array([], dtype=int)
                 parent_val_map[parent_id] = all_child_val.tolist()
+            else:
+                for child_id in child_ids:
+                    child_train = bucket_data[child_id]["train"]
+                    child_val = bucket_data[child_id]["val"]
+
+                    share_rate = 1.0 if len(child_train) <= self.small_bucket_threshold else self.parent_share_rate
+                    n_share_train = min(len(child_train), int(len(child_train) * share_rate))
+                    if n_share_train > 0:
+                        share_idx = self.rng.choice(child_train, size=n_share_train, replace=False)
+                        parent_train_map[parent_id].extend(share_idx.tolist())
+
+                    share_rate_val = 1.0 if len(child_val) <= self.small_bucket_threshold else self.parent_share_rate
+                    n_share_val = min(len(child_val), int(len(child_val) * share_rate_val))
+                    if n_share_val > 0:
+                        share_val_idx = self.rng.choice(child_val, size=n_share_val, replace=False)
+                        parent_val_map[parent_id].extend(share_val_idx.tolist())
+
+                if len(parent_train_map[parent_id]) < self.min_parent_share:
+                    all_child_train = (
+                        np.concatenate([bucket_data[c]["train"] for c in child_ids])
+                        if child_ids
+                        else np.array([], dtype=int)
+                    )
+                    parent_train_map[parent_id] = all_child_train.tolist()
+                if len(parent_val_map[parent_id]) < self.min_parent_share:
+                    all_child_val = (
+                        np.concatenate([bucket_data[c]["val"] for c in child_ids])
+                        if child_ids
+                        else np.array([], dtype=int)
+                    )
+                    parent_val_map[parent_id] = all_child_val.tolist()
 
             bucket_data[parent_id]["train_share"] = np.array(parent_train_map[parent_id], dtype=int)
             bucket_data[parent_id]["val_share"] = np.array(parent_val_map[parent_id], dtype=int)

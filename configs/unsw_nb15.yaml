@@ -72,8 +72,9 @@ BTTWD:
   gamma_bucket: 0.00                                                # 子桶个数的复杂度惩罚（类似 XGBoost gamma）
   bucket_subsample: 0.7                                             # 桶内样本随机采样比例
   max_train_samples_per_bucket: 30000                               # 每个桶最多用于训练的样本数
-  parent_share_rate: 0.0                                            # 当前代码未用，预留占位
-  min_parent_share: 0                                               # 当前代码未用，预留占位
+  use_parent_share_rate: true
+  parent_share_rate: 0.0                                            # 父桶按比例采样子桶贡献的样本占比
+  min_parent_share: 0                                               # 父桶最少回流样本数，低于该值则改用全部子桶样本
   val_ratio: 0.2                                                    # 桶内验证集比例
   min_val_samples_per_bucket: 50                                    # 桶内最少验证样本数
   use_global_backoff: true                                          # 桶和父桶无模型时是否回退全局模型
