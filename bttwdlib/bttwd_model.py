@@ -1280,6 +1280,30 @@ class BTTWDModel:
             df = df.sort_values(by=sort_col, ascending=False)
         return df
 
+    def update_test_stats(self, test_bucket_df: pd.DataFrame | None = None) -> None:
+        """Update stored bucket statistics with test-set counts/metrics."""
+
+        if test_bucket_df is None or test_bucket_df.empty:
+            return
+
+        for _, row in test_bucket_df.iterrows():
+            bucket_id = row.get("bucket_id")
+            if pd.isna(bucket_id):
+                continue
+
+            record = self.bucket_stats.get(bucket_id)
+            if record is None:
+                continue
+
+            n_test = row.get("n_test")
+            if n_test is not None and not pd.isna(n_test):
+                record["n_test"] = int(n_test)
+
+            for key in ("pos_rate_test", "BND_ratio_test", "POS_Coverage_test", "regret_test"):
+                value = row.get(key)
+                if value is not None and not pd.isna(value):
+                    record[key] = float(value)
+
     def get_threshold_logs(self) -> pd.DataFrame:
         if not self.threshold_logs:
             return pd.DataFrame()
