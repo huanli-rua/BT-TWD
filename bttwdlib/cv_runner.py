@@ -113,7 +113,7 @@ def _log_training_resources(cfg: dict, elapsed: float, mem_mb: float, backend: s
     bcfg = cfg.get("BTTWD", {})
     parent_share = "开启" if bcfg.get("use_parent_share_rate", True) else "关闭"
     min_sample_limit = "开启" if bcfg.get("use_min_bucket_size_limit", True) else "关闭"
-    fallback = "开启" if bcfg.get("use_global_backoff", True) else "关闭"
+    fallback = "开启" if bcfg.get("use_gain_weak_backoff", True) else "关闭"
     backend_note = "" if backend == "psutil" else "（psutil 未安装，使用其他方法估算）"
     log_info(
         f"【资源评估-{context}】当前配置：父桶贡献={parent_share}，最小样本限制={min_sample_limit}，"
