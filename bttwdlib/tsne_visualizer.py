@@ -75,7 +75,7 @@ def _prepare_dataset(cfg: dict, sample_size: int | None, random_state: int) -> t
     bucket_cols = _resolve_bucket_cols(cfg, df_processed)
     bucket_df = df_processed[bucket_cols].reset_index(drop=True)
 
-    if sample_size is not None and len(X) > sample_size:
+    if sample_size is not None and sample_size > 0 and len(X) > sample_size:
         rng = np.random.default_rng(random_state)
         indices = rng.choice(len(X), size=sample_size, replace=False)
         X = X[indices]
@@ -235,24 +235,45 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path) -> None:
 def visualize_fallback_with_tsne(
     config_path: str,
     output_dir: str = "results/tsne_fallback",
-    sample_size: int | None = 2000,
-    perplexity: float = 30.0,
-    learning_rate: float = 200.0,
-    random_state: int = 42,
+    sample_size: int | None = None,
+    perplexity: float | None = None,
+    learning_rate: float | None = None,
+    random_state: int | None = None,
     force_logreg_global: bool = False,
 ) -> dict:
     # 加载配置文件
     cfg = load_yaml_cfg(config_path)
-    set_global_seed(random_state)
+    tsne_cfg = cfg.get("tSNE") or cfg.get("TSNE") or {}
+
+    effective_sample_size = sample_size if sample_size is not None else tsne_cfg.get("sample_size", 2000)
+    if effective_sample_size is not None:
+        effective_sample_size = int(effective_sample_size)
+        if effective_sample_size <= 0:
+            effective_sample_size = None
+
+    effective_perplexity = perplexity if perplexity is not None else tsne_cfg.get("perplexity", 30.0)
+    effective_learning_rate = learning_rate if learning_rate is not None else tsne_cfg.get("learning_rate", 200.0)
+    effective_random_state = random_state if random_state is not None else tsne_cfg.get("random_state", 42)
+
+    effective_perplexity = float(effective_perplexity)
+    effective_learning_rate = float(effective_learning_rate)
+    effective_random_state = int(effective_random_state)
+
+    set_global_seed(effective_random_state)
 
     # 确保估计器的选择正确
     _ensure_estimators(cfg, force_logreg_global)
 
     # 准备数据集
-    X, y, bucket_df, bucket_tree = _prepare_dataset(cfg, sample_size, random_state)
+    X, y, bucket_df, bucket_tree = _prepare_dataset(cfg, effective_sample_size, effective_random_state)
 
     # 计算 t-SNE 嵌入
-    embedding = _compute_tsne_embedding(X, perplexity, learning_rate, random_state)
+    embedding = _compute_tsne_embedding(
+        X,
+        effective_perplexity,
+        effective_learning_rate,
+        effective_random_state,
+    )
 
     # 创建输出目录
     output_root = Path(output_dir)
