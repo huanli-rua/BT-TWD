@@ -7,7 +7,11 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.patches import Rectangle
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from sklearn.cluster import DBSCAN
 from sklearn.manifold import TSNE
+from sklearn.neighbors import NearestNeighbors
 
 from .bttwd_model import BTTWDModel, _XGB_AVAILABLE
 from .bucket_rules import BucketTree
@@ -113,6 +117,46 @@ def _compute_tsne_embedding(
     return embedding
 
 
+def _estimate_dbscan_eps(embedding: np.ndarray, k_neighbors: int = 10, quantile: float = 60.0) -> float:
+    n_samples = len(embedding)
+    if n_samples <= 1:
+        return 0.5
+
+    k = max(2, min(k_neighbors, n_samples))
+    nbrs = NearestNeighbors(n_neighbors=k)
+    nbrs.fit(embedding)
+    distances, _ = nbrs.kneighbors(embedding)
+    kth_distances = distances[:, -1]
+    return float(np.percentile(kth_distances, quantile))
+
+
+def _find_dense_region(df_mode: pd.DataFrame, min_samples: int = 10) -> dict[str, Any] | None:
+    embedding = df_mode[["tsne_x", "tsne_y"]].to_numpy()
+    n_samples = len(embedding)
+    if n_samples < max(2, min_samples):
+        return None
+
+    eps = _estimate_dbscan_eps(embedding, k_neighbors=min(10, n_samples - 1))
+    clustering = DBSCAN(eps=eps, min_samples=min_samples)
+    labels = clustering.fit_predict(embedding)
+    label_counts = pd.Series(labels[labels >= 0]).value_counts()
+    if label_counts.empty:
+        return None
+
+    target_label = label_counts.idxmax()
+    dense_mask = labels == target_label
+    dense_points = embedding[dense_mask]
+    x_min, y_min = dense_points.min(axis=0)
+    x_max, y_max = dense_points.max(axis=0)
+    padding = 0.1 * max(x_max - x_min, y_max - y_min, 1e-6)
+
+    return {
+        "mask": dense_mask,
+        "xlim": (x_min - padding, x_max + padding),
+        "ylim": (y_min - padding, y_max + padding),
+    }
+
+
 def _collect_mode_result(
     cfg: dict,
     mode_label: str,
@@ -191,7 +235,7 @@ def _collect_mode_result(
     }
 
 
-def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path) -> None:
+def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_size: float) -> None:
     n_modes = len(results)
     fig, axes = plt.subplots(1, n_modes, figsize=(6 * n_modes, 5), sharex=True, sharey=True)
     if n_modes == 1:
@@ -203,7 +247,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path) -> None:
         ax.scatter(
             df_mode.loc[~fallback_mask, "tsne_x"],
             df_mode.loc[~fallback_mask, "tsne_y"],
-            s=10,
+            s=point_size,
             alpha=0.6,
             c=df_mode.loc[~fallback_mask, "y_true"],
             cmap="viridis",
@@ -212,13 +256,57 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path) -> None:
         ax.scatter(
             df_mode.loc[fallback_mask, "tsne_x"],
             df_mode.loc[fallback_mask, "tsne_y"],
-            s=12,
+            s=point_size * 1.2,
             alpha=0.7,
             c=df_mode.loc[fallback_mask, "y_true"],
             cmap="coolwarm",
             label="回退决策",
             marker="x",
         )
+
+        dense_region = _find_dense_region(df_mode)
+        if dense_region:
+            rect = Rectangle(
+                (dense_region["xlim"][0], dense_region["ylim"][0]),
+                dense_region["xlim"][1] - dense_region["xlim"][0],
+                dense_region["ylim"][1] - dense_region["ylim"][0],
+                linewidth=1.2,
+                edgecolor="orange",
+                facecolor="none",
+                linestyle="--",
+                label="密集区域",
+            )
+            ax.add_patch(rect)
+
+            inset_ax = inset_axes(ax, width="40%", height="40%", loc="upper right", borderpad=1)
+            inset_ax.scatter(
+                df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_x"],
+                df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_y"],
+                s=point_size * 2,
+                alpha=0.75,
+                c=df_mode.loc[~fallback_mask & dense_region["mask"], "y_true"],
+                cmap="viridis",
+            )
+            inset_ax.scatter(
+                df_mode.loc[fallback_mask & dense_region["mask"], "tsne_x"],
+                df_mode.loc[fallback_mask & dense_region["mask"], "tsne_y"],
+                s=point_size * 2.4,
+                alpha=0.85,
+                c=df_mode.loc[fallback_mask & dense_region["mask"], "y_true"],
+                cmap="coolwarm",
+                marker="x",
+            )
+            inset_ax.set_xlim(*dense_region["xlim"])
+            inset_ax.set_ylim(*dense_region["ylim"])
+            inset_ax.set_xticks([])
+            inset_ax.set_yticks([])
+            inset_ax.set_title("局部放大")
+
+            handles, labels = ax.get_legend_handles_labels()
+            handles.append(rect)
+            labels.append("密集区域")
+            ax.legend(handles, labels)
+
         ax.set_title(f"{res['mode']} (回退占比={df_mode['fallback_used'].mean():.1%})")
         ax.set_xlabel("t-SNE 维度 1")
         ax.set_ylabel("t-SNE 维度 2")
@@ -254,6 +342,7 @@ def visualize_fallback_with_tsne(
     effective_perplexity = perplexity if perplexity is not None else tsne_cfg.get("perplexity", 30.0)
     effective_learning_rate = learning_rate if learning_rate is not None else tsne_cfg.get("learning_rate", 200.0)
     effective_random_state = random_state if random_state is not None else tsne_cfg.get("random_state", 42)
+    effective_point_size = float(tsne_cfg.get("point_size", 10))
 
     effective_perplexity = float(effective_perplexity)
     effective_learning_rate = float(effective_learning_rate)
@@ -298,7 +387,7 @@ def visualize_fallback_with_tsne(
 
     # 输出图片
     figure_path = output_root / "tsne_fallback_compare.png"
-    _plot_tsne_modes(results, figure_path)
+    _plot_tsne_modes(results, figure_path, effective_point_size)
 
     # 返回结果
     return {
