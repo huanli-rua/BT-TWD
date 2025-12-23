@@ -14,6 +14,7 @@ from .synth_data import (
 )
 from .utils_logging import log_info
 from .utils_seed import set_global_seed
+from .tsne_visualizer import visualize_fallback_with_tsne
 
 __all__ = [
     "load_yaml_cfg",
@@ -36,4 +37,5 @@ __all__ = [
     "load_synth_strong_v2",
     "log_info",
     "set_global_seed",
+    "visualize_fallback_with_tsne",
 ]
