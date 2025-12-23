@@ -7,6 +7,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from sklearn.cluster import DBSCAN
@@ -245,6 +246,17 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
     if n_modes == 1:
         axes = [axes]
 
+    all_targets = pd.concat([res["df"]["y_true"] for res in results], ignore_index=True)
+    target_norm = plt.Normalize(vmin=all_targets.min(), vmax=all_targets.max())
+    local_cmap = plt.get_cmap("viridis")
+    fallback_cmap = plt.get_cmap("coolwarm")
+
+    unique_targets = np.unique(all_targets)
+    if len(unique_targets) > 4:
+        target_values_for_legend = np.linspace(all_targets.min(), all_targets.max(), num=3)
+    else:
+        target_values_for_legend = unique_targets
+
     for ax, res in zip(axes, results):
         df_mode = res["df"]
         show_fallback = res["mode"] != "fallback_off"
@@ -259,7 +271,8 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             s=point_size,
             alpha=0.6,
             c=df_mode.loc[~fallback_mask, "y_true"],
-            cmap="viridis",
+            cmap=local_cmap,
+            norm=target_norm,
         )
         handles.append(local_scatter)
         labels.append("Local decision")
@@ -271,7 +284,8 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
                 s=point_size * 1.2,
                 alpha=0.7,
                 c=df_mode.loc[fallback_mask, "y_true"],
-                cmap="coolwarm",
+                cmap=fallback_cmap,
+                norm=target_norm,
                 label="Fallback decision",
                 marker="x",
             )
@@ -301,7 +315,8 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
                 s=point_size * 2,
                 alpha=0.75,
                 c=df_mode.loc[~fallback_mask & dense_region["mask"], "y_true"],
-                cmap="viridis",
+                cmap=local_cmap,
+                norm=target_norm,
             )
             if show_fallback:
                 inset_ax.scatter(
@@ -310,7 +325,8 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
                     s=point_size * 2.4,
                     alpha=0.85,
                     c=df_mode.loc[fallback_mask & dense_region["mask"], "y_true"],
-                    cmap="coolwarm",
+                    cmap=fallback_cmap,
+                    norm=target_norm,
                     marker="x",
                 )
             inset_ax.set_xlim(*dense_region["xlim"])
@@ -318,6 +334,31 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             inset_ax.set_xticks([])
             inset_ax.set_yticks([])
             # inset title intentionally omitted to keep the inset clean
+
+        for target_value in target_values_for_legend:
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    marker="o",
+                    linestyle="",
+                    color=local_cmap(target_norm(target_value)),
+                    label=f"Local label={target_value}",
+                )
+            )
+            labels.append(f"Local label={target_value}")
+            if show_fallback:
+                handles.append(
+                    Line2D(
+                        [],
+                        [],
+                        marker="x",
+                        linestyle="",
+                        color=fallback_cmap(target_norm(target_value)),
+                        label=f"Fallback label={target_value}",
+                    )
+                )
+                labels.append(f"Fallback label={target_value}")
 
         mode_title = "Fallback On" if res["mode"] == "fallback_on" else "Fallback Off"
         ax.set_title(f"{mode_title} (fallback ratio={df_mode['fallback_used'].mean():.1%})")
