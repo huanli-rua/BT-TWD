@@ -1,0 +1,288 @@
+from __future__ import annotations
+
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.manifold import TSNE
+
+from .bttwd_model import BTTWDModel, _XGB_AVAILABLE
+from .bucket_rules import BucketTree
+from .config_loader import load_yaml_cfg
+from .data_loader import load_dataset
+from .preprocessing import prepare_features_and_labels
+from .utils_logging import log_info
+from .utils_seed import set_global_seed
+
+
+def _ensure_estimators(cfg: dict, force_logreg_global: bool) -> None:
+    """
+    安全设置全局/桶内估计器，避免缺失 xgboost 依赖或未显式配置导致训练失败。
+    """
+
+    bcfg = cfg.setdefault("BTTWD", {})
+
+    bucket_est = bcfg.get("bucket_estimator") or bcfg.get("posterior_estimator")
+    if bucket_est is None:
+        bucket_est = "logreg"
+    bucket_est_lower = str(bucket_est).lower()
+    if bucket_est_lower in {"xgb", "xgboost"} and not _XGB_AVAILABLE:
+        log_info("【t-SNE】未检测到 xgboost，bucket_estimator 自动回退为 logreg")
+        bucket_est = "logreg"
+    bcfg["bucket_estimator"] = bucket_est
+    bcfg["posterior_estimator"] = bucket_est
+
+    global_est = bcfg.get("global_estimator", "logreg")
+    global_est_lower = str(global_est).lower()
+    if force_logreg_global or (global_est_lower in {"xgb", "xgboost"} and not _XGB_AVAILABLE):
+        if global_est_lower in {"xgb", "xgboost"} and not _XGB_AVAILABLE:
+            log_info("【t-SNE】未检测到 xgboost，global_estimator 自动回退为 logreg")
+        elif force_logreg_global and global_est_lower != "logreg":
+            log_info("【t-SNE】force_logreg_global=True，global_estimator 强制设置为 logreg")
+        bcfg["global_estimator"] = "logreg"
+
+
+def _resolve_bucket_cols(cfg: dict, df_processed: pd.DataFrame) -> list[str]:
+    prep_cfg = cfg.get("PREPROCESS", {})
+    bucket_cols: list[str] = (prep_cfg.get("continuous_cols") or []) + (prep_cfg.get("categorical_cols") or [])
+
+    bucket_levels = cfg.get("BTTWD", {}).get("bucket_levels", [])
+    for lvl in bucket_levels:
+        col_name = lvl.get("col") or lvl.get("feature")
+        if col_name and col_name not in bucket_cols:
+            bucket_cols.append(col_name)
+
+    missing_cols = [col for col in bucket_cols if col not in df_processed.columns]
+    if missing_cols:
+        raise KeyError(f"分桶特征缺失：{', '.join(missing_cols)}")
+
+    return bucket_cols
+
+
+def _prepare_dataset(cfg: dict, sample_size: int | None, random_state: int) -> tuple[np.ndarray, np.ndarray, pd.DataFrame, BucketTree]:
+    df_raw, target_col = load_dataset(cfg)
+    if "split" in df_raw.columns:
+        train_mask = df_raw["split"].astype(str).str.lower() == "train"
+        if train_mask.any():
+            df_raw = df_raw[train_mask].reset_index(drop=True)
+            log_info(f"【t-SNE】检测到 split 列，使用训练集数据进行可视化，目标列={target_col}")
+
+    X, y, meta = prepare_features_and_labels(df_raw, cfg)
+    df_processed = meta.get("df_processed", df_raw)
+    bucket_cols = _resolve_bucket_cols(cfg, df_processed)
+    bucket_df = df_processed[bucket_cols].reset_index(drop=True)
+
+    if sample_size is not None and len(X) > sample_size:
+        rng = np.random.default_rng(random_state)
+        indices = rng.choice(len(X), size=sample_size, replace=False)
+        X = X[indices]
+        y = y[indices]
+        bucket_df = bucket_df.iloc[indices].reset_index(drop=True)
+        log_info(f"【t-SNE】采样 {sample_size} 条样本用于可视化（原始 N={len(df_raw)}）")
+
+    bucket_tree = BucketTree(cfg.get("BTTWD", {}).get("bucket_levels", []), feature_names=bucket_cols)
+    return X, y, bucket_df, bucket_tree
+
+
+def _compute_tsne_embedding(
+    X: np.ndarray, perplexity: float, learning_rate: float, random_state: int
+) -> np.ndarray:
+    if not isinstance(X, np.ndarray):
+        X = np.asarray(X)
+
+    n_samples = X.shape[0]
+    max_perplexity = max(5.0, (n_samples - 1) / 3.0)
+    adjusted_perplexity = min(perplexity, max_perplexity)
+    if adjusted_perplexity < 1.0:
+        adjusted_perplexity = 1.0
+
+    tsne = TSNE(
+        n_components=2,
+        perplexity=adjusted_perplexity,
+        learning_rate=learning_rate,
+        random_state=random_state,
+        init="pca",
+        n_iter=1000,
+        verbose=1,
+    )
+    embedding = tsne.fit_transform(X)
+    log_info(f"【t-SNE】完成嵌入计算，调整后 perplexity={adjusted_perplexity:.2f}，输出维度={embedding.shape}")
+    return embedding
+
+
+def _collect_mode_result(
+    cfg: dict,
+    mode_label: str,
+    bucket_tree: BucketTree,
+    X: np.ndarray,
+    y: np.ndarray,
+    bucket_df: pd.DataFrame,
+    embedding: np.ndarray,
+    output_root: Path,
+) -> dict[str, Any]:
+    cfg_mode = deepcopy(cfg)
+    bcfg = cfg_mode.setdefault("BTTWD", {})
+    bcfg["use_gain_weak_backoff"] = mode_label == "fallback_on"
+    cfg_mode.setdefault("OUTPUT", {}).update({"run_name": f"{mode_label}_tsne"})
+
+    tree_copy = BucketTree(bucket_tree.levels_cfg, feature_names=bucket_tree.feature_names)
+    model = BTTWDModel.from_cfg(cfg_mode, feature_names=bucket_tree.feature_names, bucket_tree=tree_copy)
+    model.fit(X, y, bucket_df)
+
+    bucket_ids = model.bucket_tree.assign_buckets(bucket_df).astype(str)
+    y_pred_s3 = model.predict(X, bucket_df)
+    y_score = model.predict_proba(X, bucket_df)
+
+    fallback_stats = model.fallback_stats or {}
+    effective_map = {bid: rec.get("effective_bucket_id", bid) for bid, rec in fallback_stats.items()}
+    status_map = {bid: info.get("status") for bid, info in model.bucket_info.items()}
+
+    df_mode = pd.DataFrame(
+        {
+            "mode": mode_label,
+            "tsne_x": embedding[:, 0],
+            "tsne_y": embedding[:, 1],
+            "y_true": y,
+            "y_pred": y_pred_s3,
+            "y_score": y_score,
+            "bucket_id": bucket_ids,
+        }
+    )
+    df_mode["effective_bucket_id"] = df_mode["bucket_id"].map(lambda bid: effective_map.get(bid, bid))
+    df_mode["bucket_status"] = df_mode["bucket_id"].map(lambda bid: status_map.get(bid, "unknown"))
+    df_mode["fallback_used"] = df_mode["bucket_id"] != df_mode["effective_bucket_id"]
+
+    csv_path = output_root / f"{mode_label}_tsne_embedding.csv"
+    df_mode.to_csv(csv_path, index=False)
+    log_info(f"【t-SNE】{mode_label} 嵌入数据已保存：{csv_path}")
+
+    bucket_stats_df = model.get_bucket_stats()
+    bucket_stats_path = output_root / f"{mode_label}_bucket_stats.csv"
+    if not bucket_stats_df.empty:
+        bucket_stats_df.to_csv(bucket_stats_path, index=False)
+    else:
+        bucket_stats_path.touch()
+
+    fallback_stats_path = output_root / f"{mode_label}_fallback_stats.csv"
+    if fallback_stats:
+        pd.DataFrame(fallback_stats.values()).to_csv(fallback_stats_path, index=False)
+    else:
+        fallback_stats_path.touch()
+
+    summary = {
+        "mode": mode_label,
+        "n_samples": int(len(df_mode)),
+        "fallback_samples": int(df_mode["fallback_used"].sum()),
+        "fallback_ratio": float(df_mode["fallback_used"].mean()),
+        "unique_buckets": int(df_mode["bucket_id"].nunique()),
+        "effective_buckets": int(df_mode["effective_bucket_id"].nunique()),
+        "weak_buckets": int(sum(info.get("status") == "weak" for info in model.bucket_info.values())),
+    }
+
+    return {
+        "mode": mode_label,
+        "df": df_mode,
+        "summary": summary,
+        "bucket_stats_path": bucket_stats_path,
+        "fallback_stats_path": fallback_stats_path,
+    }
+
+
+def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path) -> None:
+    n_modes = len(results)
+    fig, axes = plt.subplots(1, n_modes, figsize=(6 * n_modes, 5), sharex=True, sharey=True)
+    if n_modes == 1:
+        axes = [axes]
+
+    for ax, res in zip(axes, results):
+        df_mode = res["df"]
+        fallback_mask = df_mode["fallback_used"]
+        ax.scatter(
+            df_mode.loc[~fallback_mask, "tsne_x"],
+            df_mode.loc[~fallback_mask, "tsne_y"],
+            s=10,
+            alpha=0.6,
+            c=df_mode.loc[~fallback_mask, "y_true"],
+            cmap="viridis",
+            label="本地决策",
+        )
+        ax.scatter(
+            df_mode.loc[fallback_mask, "tsne_x"],
+            df_mode.loc[fallback_mask, "tsne_y"],
+            s=12,
+            alpha=0.7,
+            c=df_mode.loc[fallback_mask, "y_true"],
+            cmap="coolwarm",
+            label="回退决策",
+            marker="x",
+        )
+        ax.set_title(f"{res['mode']} (回退占比={df_mode['fallback_used'].mean():.1%})")
+        ax.set_xlabel("t-SNE 维度 1")
+        ax.set_ylabel("t-SNE 维度 2")
+        ax.legend()
+
+    fig.suptitle("t-SNE 视角下的回退决策对比", fontsize=14)
+    fig.tight_layout()
+    figure_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(figure_path, dpi=200)
+    plt.close(fig)
+    log_info(f"【t-SNE】对比图已保存：{figure_path}")
+
+
+def visualize_fallback_with_tsne(
+    config_path: str,
+    output_dir: str = "results/tsne_fallback",
+    sample_size: int | None = 2000,
+    perplexity: float = 30.0,
+    learning_rate: float = 200.0,
+    random_state: int = 42,
+    force_logreg_global: bool = False,
+) -> dict:
+    # 加载配置文件
+    cfg = load_yaml_cfg(config_path)
+    set_global_seed(random_state)
+
+    # 确保估计器的选择正确
+    _ensure_estimators(cfg, force_logreg_global)
+
+    # 准备数据集
+    X, y, bucket_df, bucket_tree = _prepare_dataset(cfg, sample_size, random_state)
+
+    # 计算 t-SNE 嵌入
+    embedding = _compute_tsne_embedding(X, perplexity, learning_rate, random_state)
+
+    # 创建输出目录
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    # 收集结果并保存
+    results = []
+    for mode_label in ("fallback_on", "fallback_off"):
+        results.append(
+            _collect_mode_result(cfg, mode_label, bucket_tree, X, y, bucket_df, embedding, output_root)
+        )
+
+    combined_df = pd.concat([res["df"] for res in results], ignore_index=True)
+    combined_path = output_root / "tsne_fallback_embedding.csv"
+    combined_df.to_csv(combined_path, index=False)
+    log_info(f"【t-SNE】已保存 t-SNE 嵌入与模式标签：{combined_path}")
+
+    # 汇总摘要
+    summary_df = pd.DataFrame([res["summary"] for res in results])
+    summary_path = output_root / "tsne_fallback_summary.csv"
+    summary_df.to_csv(summary_path, index=False)
+
+    # 输出图片
+    figure_path = output_root / "tsne_fallback_compare.png"
+    _plot_tsne_modes(results, figure_path)
+
+    # 返回结果
+    return {
+        "embedding_path": combined_path,
+        "figure_path": figure_path,
+        "summary_path": summary_path,
+        "results": results,
+    }
