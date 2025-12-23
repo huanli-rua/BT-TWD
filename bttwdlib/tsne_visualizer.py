@@ -300,7 +300,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             inset_ax.set_ylim(*dense_region["ylim"])
             inset_ax.set_xticks([])
             inset_ax.set_yticks([])
-            inset_ax.set_title("局部放大")
+            # inset_ax.set_title("局部放大")
 
             handles, labels = ax.get_legend_handles_labels()
             handles.append(rect)

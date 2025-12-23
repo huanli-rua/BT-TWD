@@ -182,10 +182,10 @@ METRICS:
   pos_label: 1
 
 tSNE:
-  sample_size: 2000      # 可视化使用的最大样本数，<=0 表示不截断
-  perplexity: 30.0       # t-SNE 的 perplexity 参数
+  sample_size: 0      # 可视化使用的最大样本数，<=0 表示不截断
+  perplexity: 40.0       # t-SNE 的 perplexity 参数
   learning_rate: 200.0   # t-SNE 的学习率
-  point_size: 15      # 设置 t-SNE 可视化中点的大小
+  point_size: 5      # 设置 t-SNE 可视化中点的大小
   random_state: 42       # 随机种子，控制采样和 t-SNE 复现性
 
 OUTPUT:
