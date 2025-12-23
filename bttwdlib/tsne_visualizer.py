@@ -24,7 +24,8 @@ from .utils_seed import set_global_seed
 
 def _ensure_estimators(cfg: dict, force_logreg_global: bool) -> None:
     """
-    安全设置全局/桶内估计器，避免缺失 xgboost 依赖或未显式配置导致训练失败。
+    Safely set global/bucket estimators to avoid training failures caused by missing
+    xgboost dependencies or implicit configuration.
     """
 
     bcfg = cfg.setdefault("BTTWD", {})
@@ -34,7 +35,7 @@ def _ensure_estimators(cfg: dict, force_logreg_global: bool) -> None:
         bucket_est = "logreg"
     bucket_est_lower = str(bucket_est).lower()
     if bucket_est_lower in {"xgb", "xgboost"} and not _XGB_AVAILABLE:
-        log_info("【t-SNE】未检测到 xgboost，bucket_estimator 自动回退为 logreg")
+        log_info("[t-SNE] xgboost not detected; bucket_estimator falls back to logreg")
         bucket_est = "logreg"
     bcfg["bucket_estimator"] = bucket_est
     bcfg["posterior_estimator"] = bucket_est
@@ -43,9 +44,9 @@ def _ensure_estimators(cfg: dict, force_logreg_global: bool) -> None:
     global_est_lower = str(global_est).lower()
     if force_logreg_global or (global_est_lower in {"xgb", "xgboost"} and not _XGB_AVAILABLE):
         if global_est_lower in {"xgb", "xgboost"} and not _XGB_AVAILABLE:
-            log_info("【t-SNE】未检测到 xgboost，global_estimator 自动回退为 logreg")
+            log_info("[t-SNE] xgboost not detected; global_estimator falls back to logreg")
         elif force_logreg_global and global_est_lower != "logreg":
-            log_info("【t-SNE】force_logreg_global=True，global_estimator 强制设置为 logreg")
+            log_info("[t-SNE] force_logreg_global=True; global_estimator forced to logreg")
         bcfg["global_estimator"] = "logreg"
 
 
@@ -61,7 +62,7 @@ def _resolve_bucket_cols(cfg: dict, df_processed: pd.DataFrame) -> list[str]:
 
     missing_cols = [col for col in bucket_cols if col not in df_processed.columns]
     if missing_cols:
-        raise KeyError(f"分桶特征缺失：{', '.join(missing_cols)}")
+        raise KeyError(f"Missing bucket features: {', '.join(missing_cols)}")
 
     return bucket_cols
 
@@ -72,7 +73,7 @@ def _prepare_dataset(cfg: dict, sample_size: int | None, random_state: int) -> t
         train_mask = df_raw["split"].astype(str).str.lower() == "train"
         if train_mask.any():
             df_raw = df_raw[train_mask].reset_index(drop=True)
-            log_info(f"【t-SNE】检测到 split 列，使用训练集数据进行可视化，目标列={target_col}")
+            log_info(f"[t-SNE] Detected split column; using training data for visualization, target={target_col}")
 
     X, y, meta = prepare_features_and_labels(df_raw, cfg)
     df_processed = meta.get("df_processed", df_raw)
@@ -85,7 +86,7 @@ def _prepare_dataset(cfg: dict, sample_size: int | None, random_state: int) -> t
         X = X[indices]
         y = y[indices]
         bucket_df = bucket_df.iloc[indices].reset_index(drop=True)
-        log_info(f"【t-SNE】采样 {sample_size} 条样本用于可视化（原始 N={len(df_raw)}）")
+        log_info(f"[t-SNE] Sampled {sample_size} rows for visualization (original N={len(df_raw)})")
 
     bucket_tree = BucketTree(cfg.get("BTTWD", {}).get("bucket_levels", []), feature_names=bucket_cols)
     return X, y, bucket_df, bucket_tree
@@ -113,7 +114,10 @@ def _compute_tsne_embedding(
         verbose=1,
     )
     embedding = tsne.fit_transform(X)
-    log_info(f"【t-SNE】完成嵌入计算，调整后 perplexity={adjusted_perplexity:.2f}，输出维度={embedding.shape}")
+    log_info(
+        f"[t-SNE] Finished embedding computation; adjusted perplexity={adjusted_perplexity:.2f}, "
+        f"output shape={embedding.shape}"
+    )
     return embedding
 
 
@@ -201,7 +205,7 @@ def _collect_mode_result(
 
     csv_path = output_root / f"{mode_label}_tsne_embedding.csv"
     df_mode.to_csv(csv_path, index=False)
-    log_info(f"【t-SNE】{mode_label} 嵌入数据已保存：{csv_path}")
+    log_info(f"[t-SNE] Saved {mode_label} embedding data to: {csv_path}")
 
     bucket_stats_df = model.get_bucket_stats()
     bucket_stats_path = output_root / f"{mode_label}_bucket_stats.csv"
@@ -243,26 +247,36 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
 
     for ax, res in zip(axes, results):
         df_mode = res["df"]
-        fallback_mask = df_mode["fallback_used"]
-        ax.scatter(
+        show_fallback = res["mode"] != "fallback_off"
+        fallback_mask = df_mode["fallback_used"] if show_fallback else pd.Series(False, index=df_mode.index)
+
+        handles = []
+        labels = []
+
+        local_scatter = ax.scatter(
             df_mode.loc[~fallback_mask, "tsne_x"],
             df_mode.loc[~fallback_mask, "tsne_y"],
             s=point_size,
             alpha=0.6,
             c=df_mode.loc[~fallback_mask, "y_true"],
             cmap="viridis",
-            label="本地决策",
         )
-        ax.scatter(
-            df_mode.loc[fallback_mask, "tsne_x"],
-            df_mode.loc[fallback_mask, "tsne_y"],
-            s=point_size * 1.2,
-            alpha=0.7,
-            c=df_mode.loc[fallback_mask, "y_true"],
-            cmap="coolwarm",
-            label="回退决策",
-            marker="x",
-        )
+        handles.append(local_scatter)
+        labels.append("Local decision")
+
+        if show_fallback:
+            fallback_scatter = ax.scatter(
+                df_mode.loc[fallback_mask, "tsne_x"],
+                df_mode.loc[fallback_mask, "tsne_y"],
+                s=point_size * 1.2,
+                alpha=0.7,
+                c=df_mode.loc[fallback_mask, "y_true"],
+                cmap="coolwarm",
+                label="Fallback decision",
+                marker="x",
+            )
+            handles.append(fallback_scatter)
+            labels.append("Fallback decision")
 
         dense_region = _find_dense_region(df_mode)
         if dense_region:
@@ -274,9 +288,11 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
                 edgecolor="orange",
                 facecolor="none",
                 linestyle="--",
-                label="密集区域",
+                label="Dense region",
             )
             ax.add_patch(rect)
+            handles.append(rect)
+            labels.append("Dense region")
 
             inset_ax = inset_axes(ax, width="40%", height="40%", loc="upper right", borderpad=1)
             inset_ax.scatter(
@@ -287,37 +303,34 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
                 c=df_mode.loc[~fallback_mask & dense_region["mask"], "y_true"],
                 cmap="viridis",
             )
-            inset_ax.scatter(
-                df_mode.loc[fallback_mask & dense_region["mask"], "tsne_x"],
-                df_mode.loc[fallback_mask & dense_region["mask"], "tsne_y"],
-                s=point_size * 2.4,
-                alpha=0.85,
-                c=df_mode.loc[fallback_mask & dense_region["mask"], "y_true"],
-                cmap="coolwarm",
-                marker="x",
-            )
+            if show_fallback:
+                inset_ax.scatter(
+                    df_mode.loc[fallback_mask & dense_region["mask"], "tsne_x"],
+                    df_mode.loc[fallback_mask & dense_region["mask"], "tsne_y"],
+                    s=point_size * 2.4,
+                    alpha=0.85,
+                    c=df_mode.loc[fallback_mask & dense_region["mask"], "y_true"],
+                    cmap="coolwarm",
+                    marker="x",
+                )
             inset_ax.set_xlim(*dense_region["xlim"])
             inset_ax.set_ylim(*dense_region["ylim"])
             inset_ax.set_xticks([])
             inset_ax.set_yticks([])
-            # inset_ax.set_title("局部放大")
+            # inset title intentionally omitted to keep the inset clean
 
-            handles, labels = ax.get_legend_handles_labels()
-            handles.append(rect)
-            labels.append("密集区域")
-            ax.legend(handles, labels)
+        mode_title = "Fallback On" if res["mode"] == "fallback_on" else "Fallback Off"
+        ax.set_title(f"{mode_title} (fallback ratio={df_mode['fallback_used'].mean():.1%})")
+        ax.set_xlabel("t-SNE dimension 1")
+        ax.set_ylabel("t-SNE dimension 2")
+        ax.legend(handles, labels)
 
-        ax.set_title(f"{res['mode']} (回退占比={df_mode['fallback_used'].mean():.1%})")
-        ax.set_xlabel("t-SNE 维度 1")
-        ax.set_ylabel("t-SNE 维度 2")
-        ax.legend()
-
-    fig.suptitle("t-SNE 视角下的回退决策对比", fontsize=14)
+    fig.suptitle("Fallback decisions in t-SNE space", fontsize=14)
     fig.tight_layout()
     figure_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(figure_path, dpi=200)
     plt.close(fig)
-    log_info(f"【t-SNE】对比图已保存：{figure_path}")
+    log_info(f"[t-SNE] Comparison figure saved to: {figure_path}")
 
 
 def visualize_fallback_with_tsne(
@@ -329,7 +342,7 @@ def visualize_fallback_with_tsne(
     random_state: int | None = None,
     force_logreg_global: bool = False,
 ) -> dict:
-    # 加载配置文件
+    # Load configuration
     cfg = load_yaml_cfg(config_path)
     tsne_cfg = cfg.get("tSNE") or cfg.get("TSNE") or {}
 
@@ -350,13 +363,13 @@ def visualize_fallback_with_tsne(
 
     set_global_seed(effective_random_state)
 
-    # 确保估计器的选择正确
+    # Ensure estimators are selected correctly
     _ensure_estimators(cfg, force_logreg_global)
 
-    # 准备数据集
+    # Prepare dataset
     X, y, bucket_df, bucket_tree = _prepare_dataset(cfg, effective_sample_size, effective_random_state)
 
-    # 计算 t-SNE 嵌入
+    # Compute t-SNE embedding
     embedding = _compute_tsne_embedding(
         X,
         effective_perplexity,
@@ -364,11 +377,11 @@ def visualize_fallback_with_tsne(
         effective_random_state,
     )
 
-    # 创建输出目录
+    # Create output directory
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    # 收集结果并保存
+    # Collect results and save
     results = []
     for mode_label in ("fallback_on", "fallback_off"):
         results.append(
@@ -378,18 +391,18 @@ def visualize_fallback_with_tsne(
     combined_df = pd.concat([res["df"] for res in results], ignore_index=True)
     combined_path = output_root / "tsne_fallback_embedding.csv"
     combined_df.to_csv(combined_path, index=False)
-    log_info(f"【t-SNE】已保存 t-SNE 嵌入与模式标签：{combined_path}")
+    log_info(f"[t-SNE] Saved t-SNE embedding with mode labels: {combined_path}")
 
-    # 汇总摘要
+    # Summarize results
     summary_df = pd.DataFrame([res["summary"] for res in results])
     summary_path = output_root / "tsne_fallback_summary.csv"
     summary_df.to_csv(summary_path, index=False)
 
-    # 输出图片
+    # Export figure
     figure_path = output_root / "tsne_fallback_compare.png"
     _plot_tsne_modes(results, figure_path, effective_point_size)
 
-    # 返回结果
+    # Return result paths
     return {
         "embedding_path": combined_path,
         "figure_path": figure_path,
