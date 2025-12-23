@@ -7,7 +7,6 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from sklearn.cluster import DBSCAN
@@ -248,14 +247,9 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
 
     all_targets = pd.concat([res["df"]["y_true"] for res in results], ignore_index=True)
     target_norm = plt.Normalize(vmin=all_targets.min(), vmax=all_targets.max())
+    target_min, target_max = float(all_targets.min()), float(all_targets.max())
     local_cmap = plt.get_cmap("viridis")
     fallback_cmap = plt.get_cmap("coolwarm")
-
-    unique_targets = np.unique(all_targets)
-    if len(unique_targets) > 4:
-        target_values_for_legend = np.linspace(all_targets.min(), all_targets.max(), num=3)
-    else:
-        target_values_for_legend = unique_targets
 
     for ax, res in zip(axes, results):
         df_mode = res["df"]
@@ -275,7 +269,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             norm=target_norm,
         )
         handles.append(local_scatter)
-        labels.append("Local decision")
+        labels.append(f"Local decision (labels {target_min:g}→{target_max:g})")
 
         if show_fallback:
             fallback_scatter = ax.scatter(
@@ -290,7 +284,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
                 marker="x",
             )
             handles.append(fallback_scatter)
-            labels.append("Fallback decision")
+            labels.append(f"Fallback decision (labels {target_min:g}→{target_max:g})")
 
         dense_region = _find_dense_region(df_mode)
         if dense_region:
@@ -335,36 +329,20 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             inset_ax.set_yticks([])
             # inset title intentionally omitted to keep the inset clean
 
-        for target_value in target_values_for_legend:
-            handles.append(
-                Line2D(
-                    [],
-                    [],
-                    marker="o",
-                    linestyle="",
-                    color=local_cmap(target_norm(target_value)),
-                    label=f"Local label={target_value}",
-                )
-            )
-            labels.append(f"Local label={target_value}")
-            if show_fallback:
-                handles.append(
-                    Line2D(
-                        [],
-                        [],
-                        marker="x",
-                        linestyle="",
-                        color=fallback_cmap(target_norm(target_value)),
-                        label=f"Fallback label={target_value}",
-                    )
-                )
-                labels.append(f"Fallback label={target_value}")
-
         mode_title = "Fallback On" if res["mode"] == "fallback_on" else "Fallback Off"
         ax.set_title(f"{mode_title} (fallback ratio={df_mode['fallback_used'].mean():.1%})")
         ax.set_xlabel("t-SNE dimension 1")
         ax.set_ylabel("t-SNE dimension 2")
-        ax.legend(handles, labels)
+        ax.legend(
+            handles,
+            labels,
+            loc="upper right",
+            fontsize=8,
+            frameon=True,
+            markerscale=0.85,
+            borderpad=0.5,
+            handlelength=1.8,
+        )
 
     fig.suptitle("Fallback decisions in t-SNE space", fontsize=14)
     fig.tight_layout()
