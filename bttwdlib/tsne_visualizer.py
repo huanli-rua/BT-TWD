@@ -8,8 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.patches import Rectangle
-from matplotlib.lines import Line2D
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from sklearn.cluster import DBSCAN
 from sklearn.manifold import TSNE
 from sklearn.neighbors import NearestNeighbors
@@ -135,25 +134,10 @@ def _estimate_dbscan_eps(embedding: np.ndarray, k_neighbors: int = 10, quantile:
     return float(np.percentile(kth_distances, quantile))
 
 
-def _find_dense_region(
-    df_mode: pd.DataFrame,
-    fallback_mask: pd.Series | None = None,
-    min_samples: int = 10,
-) -> dict[str, Any] | None:
-    if fallback_mask is not None and fallback_mask.any():
-        fallback_indices = df_mode.index[fallback_mask]
-        if len(fallback_indices) >= min_samples:
-            subset = df_mode.loc[fallback_indices, ["tsne_x", "tsne_y"]]
-            embedding = subset.to_numpy()
-            use_subset = True
-        else:
-            embedding = df_mode[["tsne_x", "tsne_y"]].to_numpy()
-            use_subset = False
-    else:
-        embedding = df_mode[["tsne_x", "tsne_y"]].to_numpy()
-        use_subset = False
+def _find_dense_region(df_mode: pd.DataFrame, min_samples: int = 10) -> dict[str, Any] | None:
+    embedding = df_mode[["tsne_x", "tsne_y"]].to_numpy()
     n_samples = len(embedding)
-    if n_samples < 2:
+    if n_samples < max(2, min_samples):
         return None
 
     eps = _estimate_dbscan_eps(embedding, k_neighbors=min(10, n_samples - 1))
@@ -161,28 +145,14 @@ def _find_dense_region(
     labels = clustering.fit_predict(embedding)
     label_counts = pd.Series(labels[labels >= 0]).value_counts()
     if label_counts.empty:
-        x_min, x_max = np.percentile(embedding[:, 0], [10, 90])
-        y_min, y_max = np.percentile(embedding[:, 1], [10, 90])
-        dense_mask = (
-            (embedding[:, 0] >= x_min)
-            & (embedding[:, 0] <= x_max)
-            & (embedding[:, 1] >= y_min)
-            & (embedding[:, 1] <= y_max)
-        )
-        if not dense_mask.any():
-            dense_mask = np.ones(n_samples, dtype=bool)
-    else:
-        target_label = label_counts.idxmax()
-        dense_mask = labels == target_label
+        return None
+
+    target_label = label_counts.idxmax()
+    dense_mask = labels == target_label
     dense_points = embedding[dense_mask]
     x_min, y_min = dense_points.min(axis=0)
     x_max, y_max = dense_points.max(axis=0)
     padding = 0.1 * max(x_max - x_min, y_max - y_min, 1e-6)
-
-    if use_subset:
-        full_mask = pd.Series(False, index=df_mode.index)
-        full_mask.loc[fallback_indices] = dense_mask
-        dense_mask = full_mask.to_numpy()
 
     return {
         "mask": dense_mask,
@@ -275,158 +245,97 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
     if n_modes == 1:
         axes = [axes]
 
-    class_colors = {
-        0: "#3f007d",
-        1: "#f4d03f",
-    }
-    class_order = [0, 1]
-
-    def scatter_by_class(
-        ax: plt.Axes,
-        df: pd.DataFrame,
-        mask: pd.Series,
-        marker: str,
-        size: float,
-        alpha: float,
-    ) -> None:
-        for cls in class_order:
-            cls_mask = mask & (df["y_pred"] == cls)
-            if not cls_mask.any():
-                continue
-            kwargs: dict[str, Any] = {
-                "s": size,
-                "alpha": alpha,
-                "marker": marker,
-            }
-            if marker == "x":
-                kwargs.update({"color": class_colors[cls], "linewidths": 0.8})
-            else:
-                kwargs.update({"c": class_colors[cls], "linewidths": 0.0})
-            ax.scatter(
-                df.loc[cls_mask, "tsne_x"],
-                df.loc[cls_mask, "tsne_y"],
-                **kwargs,
-            )
+    all_targets = pd.concat([res["df"]["y_true"] for res in results], ignore_index=True)
+    target_norm = plt.Normalize(vmin=all_targets.min(), vmax=all_targets.max())
+    target_min, target_max = float(all_targets.min()), float(all_targets.max())
+    local_cmap = plt.get_cmap("viridis")
+    fallback_cmap = plt.get_cmap("coolwarm")
 
     for ax, res in zip(axes, results):
         df_mode = res["df"]
         show_fallback = res["mode"] != "fallback_off"
         fallback_mask = df_mode["fallback_used"] if show_fallback else pd.Series(False, index=df_mode.index)
 
-        local_mask = ~fallback_mask
-        scatter_by_class(ax, df_mode, local_mask, marker="o", size=point_size, alpha=0.6)
+        handles = []
+        labels = []
+
+        local_scatter = ax.scatter(
+            df_mode.loc[~fallback_mask, "tsne_x"],
+            df_mode.loc[~fallback_mask, "tsne_y"],
+            s=point_size,
+            alpha=0.6,
+            c=df_mode.loc[~fallback_mask, "y_true"],
+            cmap=local_cmap,
+            norm=target_norm,
+        )
+        handles.append(local_scatter)
+        labels.append(f"Local decision (labels {target_min:g}→{target_max:g})")
 
         if show_fallback:
-            scatter_by_class(ax, df_mode, fallback_mask, marker="x", size=point_size * 1.2, alpha=0.7)
+            fallback_scatter = ax.scatter(
+                df_mode.loc[fallback_mask, "tsne_x"],
+                df_mode.loc[fallback_mask, "tsne_y"],
+                s=point_size * 1.2,
+                alpha=0.7,
+                c=df_mode.loc[fallback_mask, "y_true"],
+                cmap=fallback_cmap,
+                norm=target_norm,
+                label="Fallback decision",
+                marker="x",
+            )
+            handles.append(fallback_scatter)
+            labels.append(f"Fallback decision (labels {target_min:g}→{target_max:g})")
 
-        dense_region = _find_dense_region(df_mode, fallback_mask=fallback_mask)
+        dense_region = _find_dense_region(df_mode)
         if dense_region:
+            rect = Rectangle(
+                (dense_region["xlim"][0], dense_region["ylim"][0]),
+                dense_region["xlim"][1] - dense_region["xlim"][0],
+                dense_region["ylim"][1] - dense_region["ylim"][0],
+                linewidth=1.2,
+                edgecolor="orange",
+                facecolor="none",
+                linestyle="--",
+                label="Dense region",
+            )
+            ax.add_patch(rect)
+            handles.append(rect)
+            labels.append("Dense region")
+
             inset_ax = inset_axes(ax, width="40%", height="40%", loc="lower right", borderpad=1)
-            dense_mask = pd.Series(dense_region["mask"], index=df_mode.index)
-            scatter_by_class(
-                inset_ax,
-                df_mode,
-                local_mask & dense_mask,
-                marker="o",
-                size=point_size * 2,
+            inset_ax.scatter(
+                df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_x"],
+                df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_y"],
+                s=point_size * 2,
                 alpha=0.75,
+                c=df_mode.loc[~fallback_mask & dense_region["mask"], "y_true"],
+                cmap=local_cmap,
+                norm=target_norm,
             )
             if show_fallback:
-                scatter_by_class(
-                    inset_ax,
-                    df_mode,
-                    fallback_mask & dense_mask,
-                    marker="x",
-                    size=point_size * 2.4,
+                inset_ax.scatter(
+                    df_mode.loc[fallback_mask & dense_region["mask"], "tsne_x"],
+                    df_mode.loc[fallback_mask & dense_region["mask"], "tsne_y"],
+                    s=point_size * 2.4,
                     alpha=0.85,
+                    c=df_mode.loc[fallback_mask & dense_region["mask"], "y_true"],
+                    cmap=fallback_cmap,
+                    norm=target_norm,
+                    marker="x",
                 )
             inset_ax.set_xlim(*dense_region["xlim"])
             inset_ax.set_ylim(*dense_region["ylim"])
-            inset_ax.tick_params(labelsize=8)
-            rect_patch, connector1, connector2 = mark_inset(
-                ax,
-                inset_ax,
-                loc1=2,
-                loc2=4,
-                fc="none",
-                ec="0.2",
-                lw=1.0,
-                linestyle="--",
-            )
-            rect_patch.set_linestyle("--")
-            rect_patch.set_linewidth(1.0)
-            rect_patch.set_edgecolor("0.2")
-            rect_patch.set_facecolor("none")
-            for connector in (connector1, connector2):
-                connector.set_color("0.2")
-                connector.set_linewidth(1.0)
-                connector.set_linestyle("-")
+            inset_ax.set_xticks([])
+            inset_ax.set_yticks([])
+            # inset title intentionally omitted to keep the inset clean
 
         mode_title = "Fallback On" if res["mode"] == "fallback_on" else "Fallback Off"
         ax.set_title(f"{mode_title} (fallback ratio={df_mode['fallback_used'].mean():.1%})")
         ax.set_xlabel("t-SNE dimension 1")
         ax.set_ylabel("t-SNE dimension 2")
-        legend_handles = [
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                linestyle="none",
-                markerfacecolor=class_colors[0],
-                markeredgecolor=class_colors[0],
-                markersize=6,
-                label="Local decision → class 0",
-            ),
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                linestyle="none",
-                markerfacecolor=class_colors[1],
-                markeredgecolor=class_colors[1],
-                markersize=6,
-                label="Local decision → class 1",
-            ),
-        ]
-        if show_fallback:
-            legend_handles.extend(
-                [
-                    Line2D(
-                        [0],
-                        [0],
-                        marker="x",
-                        linestyle="none",
-                        markeredgecolor=class_colors[0],
-                        markerfacecolor="none",
-                        markersize=6,
-                        label="Fallback decision → class 0",
-                    ),
-                    Line2D(
-                        [0],
-                        [0],
-                        marker="x",
-                        linestyle="none",
-                        markeredgecolor=class_colors[1],
-                        markerfacecolor="none",
-                        markersize=6,
-                        label="Fallback decision → class 1",
-                    ),
-                ]
-            )
-        legend_handles.append(
-            Rectangle(
-                (0, 0),
-                1,
-                1,
-                linewidth=1.0,
-                edgecolor="0.2",
-                facecolor="none",
-                linestyle="--",
-                label="Dense region",
-            )
-        )
         ax.legend(
-            handles=legend_handles,
+            handles,
+            labels,
             loc="upper right",
             fontsize=8,
             frameon=True,
