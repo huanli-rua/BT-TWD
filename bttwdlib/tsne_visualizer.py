@@ -302,7 +302,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             handles.append(rect)
             labels.append("Dense region")
 
-            inset_ax = inset_axes(ax, width="40%", height="40%", loc="upper right", borderpad=1)
+            inset_ax = inset_axes(ax, width="40%", height="40%", loc="lower right", borderpad=1)
             inset_ax.scatter(
                 df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_x"],
                 df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_y"],

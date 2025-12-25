@@ -1,0 +1,11 @@
+bucket_id,level,assigned_samples,used_local_decision,fallback_to_parent,parent_id,is_weak,effective_bucket_id,fallback_from_children
+L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=low_limit,3,720,720,0,L1_ever_delay=has_delay|L2_max_delay_bin=medium,False,L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=low_limit,0
+L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=mid_limit,3,201,201,0,L1_ever_delay=has_delay|L2_max_delay_bin=medium,False,L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=mid_limit,0
+L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=others,3,86,86,0,L1_ever_delay=has_delay|L2_max_delay_bin=medium,False,L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=others,0
+L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=high_limit,3,1953,1953,0,L1_ever_delay=has_delay|L2_max_delay_bin=mild,False,L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=high_limit,0
+L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=low_limit,3,4044,4044,0,L1_ever_delay=has_delay|L2_max_delay_bin=mild,False,L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=low_limit,0
+L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=mid_limit,3,2879,2879,0,L1_ever_delay=has_delay|L2_max_delay_bin=mild,False,L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=mid_limit,0
+L1_ever_delay=has_delay|L2_max_delay_bin=others,2,186,186,0,L1_ever_delay=has_delay,False,L1_ever_delay=has_delay|L2_max_delay_bin=others,0
+L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=high_limit,3,7565,7565,0,L1_ever_delay=no_delay|L2_max_delay_bin=none,False,L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=high_limit,0
+L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=low_limit,3,5898,5898,0,L1_ever_delay=no_delay|L2_max_delay_bin=none,False,L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=low_limit,0
+L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=mid_limit,3,6468,6468,0,L1_ever_delay=no_delay|L2_max_delay_bin=none,False,L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=mid_limit,0
