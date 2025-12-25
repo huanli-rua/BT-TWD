@@ -1,0 +1,17 @@
+bucket_id,parent_id,level,split_name,split_type,split_rule,n_samples_total,n_train,n_val,n_test,is_leaf,is_weak,effective_bucket_id
+ROOT,ROOT,0,ROOT,ROOT,all,30000,4799,1200,,False,False,ROOT
+L1_ever_delay=has_delay,ROOT,1,L1_ever_delay,numeric_bin,has_delay,10069,1730,432,,False,True,ROOT
+L1_ever_delay=no_delay,ROOT,1,L1_ever_delay,numeric_bin,no_delay,19931,3179,807,,False,True,ROOT
+L1_ever_delay=has_delay|L2_max_delay_bin=medium,L1_ever_delay=has_delay,2,L2_max_delay_bin,categorical_group,medium,1007,334,205,,False,False,L1_ever_delay=has_delay|L2_max_delay_bin=medium
+L1_ever_delay=has_delay|L2_max_delay_bin=mild,L1_ever_delay=has_delay,2,L2_max_delay_bin,categorical_group,mild,8876,1433,340,,False,False,L1_ever_delay=has_delay|L2_max_delay_bin=mild
+L1_ever_delay=has_delay|L2_max_delay_bin=others,L1_ever_delay=has_delay,2,L2_max_delay_bin,categorical_group,others,186,137,49,,True,True,ROOT
+L1_ever_delay=no_delay|L2_max_delay_bin=none,L1_ever_delay=no_delay,2,L2_max_delay_bin,categorical_group,none,19931,3179,806,,False,False,L1_ever_delay=no_delay|L2_max_delay_bin=none
+L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=low_limit,L1_ever_delay=has_delay|L2_max_delay_bin=medium,3,L3_LIMIT_BAL,numeric_bin,low_limit,720,584,136,,True,True,L1_ever_delay=has_delay|L2_max_delay_bin=medium
+L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=mid_limit,L1_ever_delay=has_delay|L2_max_delay_bin=medium,3,L3_LIMIT_BAL,numeric_bin,mid_limit,201,160,41,,True,True,L1_ever_delay=has_delay|L2_max_delay_bin=medium
+L1_ever_delay=has_delay|L2_max_delay_bin=medium|L3_LIMIT_BAL=others,L1_ever_delay=has_delay|L2_max_delay_bin=medium,3,L3_LIMIT_BAL,numeric_bin,others,86,58,28,,True,True,L1_ever_delay=has_delay|L2_max_delay_bin=medium
+L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=high_limit,L1_ever_delay=has_delay|L2_max_delay_bin=mild,3,L3_LIMIT_BAL,numeric_bin,high_limit,1953,1585,368,,True,True,L1_ever_delay=has_delay|L2_max_delay_bin=mild
+L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=low_limit,L1_ever_delay=has_delay|L2_max_delay_bin=mild,3,L3_LIMIT_BAL,numeric_bin,low_limit,4044,3230,814,,True,True,L1_ever_delay=has_delay|L2_max_delay_bin=mild
+L1_ever_delay=has_delay|L2_max_delay_bin=mild|L3_LIMIT_BAL=mid_limit,L1_ever_delay=has_delay|L2_max_delay_bin=mild,3,L3_LIMIT_BAL,numeric_bin,mid_limit,2879,2350,529,,True,True,L1_ever_delay=has_delay|L2_max_delay_bin=mild
+L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=high_limit,L1_ever_delay=no_delay|L2_max_delay_bin=none,3,L3_LIMIT_BAL,numeric_bin,high_limit,7565,6030,1535,,True,False,L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=high_limit
+L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=low_limit,L1_ever_delay=no_delay|L2_max_delay_bin=none,3,L3_LIMIT_BAL,numeric_bin,low_limit,5898,4690,1208,,True,True,L1_ever_delay=no_delay|L2_max_delay_bin=none
+L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=mid_limit,L1_ever_delay=no_delay|L2_max_delay_bin=none,3,L3_LIMIT_BAL,numeric_bin,mid_limit,6468,5176,1292,,True,False,L1_ever_delay=no_delay|L2_max_delay_bin=none|L3_LIMIT_BAL=mid_limit
