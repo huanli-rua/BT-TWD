@@ -7,6 +7,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from sklearn.cluster import DBSCAN
@@ -306,6 +307,8 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             labels.append("Fallback decision (Negative)")
 
         dense_region = _find_dense_region(df_mode)
+        handles = list(legend_handles)
+        labels = [handle.get_label() for handle in handles]
         if dense_region:
             rect = Rectangle(
                 (dense_region["xlim"][0], dense_region["ylim"][0]),

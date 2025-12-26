@@ -1,0 +1,3 @@
+mode,n_samples,fallback_samples,fallback_ratio,unique_buckets,effective_buckets,weak_buckets
+fallback_on,45211,26663,0.5897458583088186,87,67,62
+fallback_off,45211,0,0.0,87,87,0
