@@ -8,8 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
 from sklearn.cluster import DBSCAN
 from sklearn.manifold import TSNE
 from sklearn.neighbors import NearestNeighbors
@@ -326,20 +325,6 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
         handles = list(legend_handles)
         labels = [handle.get_label() for handle in handles]
         if dense_region:
-            rect = Rectangle(
-                (dense_region["xlim"][0], dense_region["ylim"][0]),
-                dense_region["xlim"][1] - dense_region["xlim"][0],
-                dense_region["ylim"][1] - dense_region["ylim"][0],
-                linewidth=1.2,
-                edgecolor="orange",
-                facecolor="none",
-                linestyle="--",
-                label="Dense region",
-            )
-            ax.add_patch(rect)
-            handles.append(rect)
-            labels.append("Dense region")
-
             inset_ax = inset_axes(ax, width="40%", height="40%", loc="lower right", borderpad=1)
             inset_ax.scatter(
                 df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_x"],
@@ -366,6 +351,19 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             inset_ax.set_xticks([])
             inset_ax.set_yticks([])
             # inset title intentionally omitted to keep the inset clean
+            rect, connector1, connector2 = mark_inset(
+                ax,
+                inset_ax,
+                loc1=2,
+                loc2=4,
+                fc="none",
+                ec="orange",
+                lw=1.2,
+                linestyle="--",
+            )
+            rect.set_label("Dense region")
+            handles.append(rect)
+            labels.append("Dense region")
 
         mode_title = "Fallback On" if res["mode"] == "fallback_on" else "Fallback Off"
         ax.set_title(f"{mode_title} (fallback ratio={df_mode['fallback_used'].mean():.1%})")
