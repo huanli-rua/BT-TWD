@@ -245,11 +245,10 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
     if n_modes == 1:
         axes = [axes]
 
-    all_targets = pd.concat([res["df"]["y_true"] for res in results], ignore_index=True)
-    target_norm = plt.Normalize(vmin=all_targets.min(), vmax=all_targets.max())
-    target_min, target_max = float(all_targets.min()), float(all_targets.max())
-    local_cmap = plt.get_cmap("viridis")
-    fallback_cmap = plt.get_cmap("coolwarm")
+    local_positive_cmap = plt.get_cmap("viridis")
+    local_negative_cmap = plt.get_cmap("inferno")
+    fallback_positive_cmap = plt.get_cmap("coolwarm")
+    fallback_negative_cmap = plt.get_cmap("plasma")
 
     for ax, res in zip(axes, results):
         df_mode = res["df"]
@@ -259,32 +258,52 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
         handles = []
         labels = []
 
-        local_scatter = ax.scatter(
-            df_mode.loc[~fallback_mask, "tsne_x"],
-            df_mode.loc[~fallback_mask, "tsne_y"],
+        local_positive_scatter = ax.scatter(
+            df_mode.loc[(~fallback_mask) & (df_mode["y_true"] == 1), "tsne_x"],
+            df_mode.loc[(~fallback_mask) & (df_mode["y_true"] == 1), "tsne_y"],
             s=point_size,
             alpha=0.6,
-            c=df_mode.loc[~fallback_mask, "y_true"],
-            cmap=local_cmap,
-            norm=target_norm,
+            c=df_mode.loc[(~fallback_mask) & (df_mode["y_true"] == 1), "y_true"],
+            cmap=local_positive_cmap,
         )
-        handles.append(local_scatter)
-        labels.append(f"Local decision (labels {target_min:g}→{target_max:g})")
+        handles.append(local_positive_scatter)
+        labels.append("Local decision (Positive)")
+
+        local_negative_scatter = ax.scatter(
+            df_mode.loc[(~fallback_mask) & (df_mode["y_true"] == 0), "tsne_x"],
+            df_mode.loc[(~fallback_mask) & (df_mode["y_true"] == 0), "tsne_y"],
+            s=point_size,
+            alpha=0.6,
+            c=df_mode.loc[(~fallback_mask) & (df_mode["y_true"] == 0), "y_true"],
+            cmap=local_negative_cmap,
+        )
+        handles.append(local_negative_scatter)
+        labels.append("Local decision (Negative)")
 
         if show_fallback:
-            fallback_scatter = ax.scatter(
-                df_mode.loc[fallback_mask, "tsne_x"],
-                df_mode.loc[fallback_mask, "tsne_y"],
+            fallback_positive_scatter = ax.scatter(
+                df_mode.loc[(fallback_mask) & (df_mode["y_true"] == 1), "tsne_x"],
+                df_mode.loc[(fallback_mask) & (df_mode["y_true"] == 1), "tsne_y"],
                 s=point_size * 1.2,
                 alpha=0.7,
-                c=df_mode.loc[fallback_mask, "y_true"],
-                cmap=fallback_cmap,
-                norm=target_norm,
-                label="Fallback decision",
+                c=df_mode.loc[(fallback_mask) & (df_mode["y_true"] == 1), "y_true"],
+                cmap=fallback_positive_cmap,
                 marker="x",
             )
-            handles.append(fallback_scatter)
-            labels.append(f"Fallback decision (labels {target_min:g}→{target_max:g})")
+            handles.append(fallback_positive_scatter)
+            labels.append("Fallback decision (Positive)")
+
+            fallback_negative_scatter = ax.scatter(
+                df_mode.loc[(fallback_mask) & (df_mode["y_true"] == 0), "tsne_x"],
+                df_mode.loc[(fallback_mask) & (df_mode["y_true"] == 0), "tsne_y"],
+                s=point_size * 1.2,
+                alpha=0.7,
+                c=df_mode.loc[(fallback_mask) & (df_mode["y_true"] == 0), "y_true"],
+                cmap=fallback_negative_cmap,
+                marker="x",
+            )
+            handles.append(fallback_negative_scatter)
+            labels.append("Fallback decision (Negative)")
 
         dense_region = _find_dense_region(df_mode)
         if dense_region:
@@ -304,23 +323,38 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
 
             inset_ax = inset_axes(ax, width="40%", height="40%", loc="lower right", borderpad=1)
             inset_ax.scatter(
-                df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_x"],
-                df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_y"],
+                df_mode.loc[(~fallback_mask) & dense_region["mask"] & (df_mode["y_true"] == 1), "tsne_x"],
+                df_mode.loc[(~fallback_mask) & dense_region["mask"] & (df_mode["y_true"] == 1), "tsne_y"],
                 s=point_size * 2,
                 alpha=0.75,
-                c=df_mode.loc[~fallback_mask & dense_region["mask"], "y_true"],
-                cmap=local_cmap,
-                norm=target_norm,
+                c=df_mode.loc[(~fallback_mask) & dense_region["mask"] & (df_mode["y_true"] == 1), "y_true"],
+                cmap=local_positive_cmap,
+            )
+            inset_ax.scatter(
+                df_mode.loc[(~fallback_mask) & dense_region["mask"] & (df_mode["y_true"] == 0), "tsne_x"],
+                df_mode.loc[(~fallback_mask) & dense_region["mask"] & (df_mode["y_true"] == 0), "tsne_y"],
+                s=point_size * 2,
+                alpha=0.75,
+                c=df_mode.loc[(~fallback_mask) & dense_region["mask"] & (df_mode["y_true"] == 0), "y_true"],
+                cmap=local_negative_cmap,
             )
             if show_fallback:
                 inset_ax.scatter(
-                    df_mode.loc[fallback_mask & dense_region["mask"], "tsne_x"],
-                    df_mode.loc[fallback_mask & dense_region["mask"], "tsne_y"],
+                    df_mode.loc[fallback_mask & dense_region["mask"] & (df_mode["y_true"] == 1), "tsne_x"],
+                    df_mode.loc[fallback_mask & dense_region["mask"] & (df_mode["y_true"] == 1), "tsne_y"],
                     s=point_size * 2.4,
                     alpha=0.85,
-                    c=df_mode.loc[fallback_mask & dense_region["mask"], "y_true"],
-                    cmap=fallback_cmap,
-                    norm=target_norm,
+                    c=df_mode.loc[fallback_mask & dense_region["mask"] & (df_mode["y_true"] == 1), "y_true"],
+                    cmap=fallback_positive_cmap,
+                    marker="x",
+                )
+                inset_ax.scatter(
+                    df_mode.loc[fallback_mask & dense_region["mask"] & (df_mode["y_true"] == 0), "tsne_x"],
+                    df_mode.loc[fallback_mask & dense_region["mask"] & (df_mode["y_true"] == 0), "tsne_y"],
+                    s=point_size * 2.4,
+                    alpha=0.85,
+                    c=df_mode.loc[fallback_mask & dense_region["mask"] & (df_mode["y_true"] == 0), "y_true"],
+                    cmap=fallback_negative_cmap,
                     marker="x",
                 )
             inset_ax.set_xlim(*dense_region["xlim"])
