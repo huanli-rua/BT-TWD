@@ -7,6 +7,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from sklearn.cluster import DBSCAN
@@ -245,31 +246,66 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
     if n_modes == 1:
         axes = [axes]
 
-    all_targets = pd.concat([res["df"]["y_true"] for res in results], ignore_index=True)
-    target_norm = plt.Normalize(vmin=all_targets.min(), vmax=all_targets.max())
-    target_min, target_max = float(all_targets.min()), float(all_targets.max())
-    local_cmap = plt.get_cmap("viridis")
-    fallback_cmap = plt.get_cmap("coolwarm")
+    color_negative = "#1f77b4"
+    color_positive = "#d62728"
+    label_colors = {0: color_negative, 1: color_positive}
+
+    def _target_colors(targets: pd.Series) -> list[str]:
+        return targets.map(lambda value: label_colors.get(int(value), color_negative)).tolist()
+
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="none",
+            markerfacecolor=color_negative,
+            markeredgecolor=color_negative,
+            markersize=6,
+            label="Local decision, y=0 (negative)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="none",
+            markerfacecolor=color_positive,
+            markeredgecolor=color_positive,
+            markersize=6,
+            label="Local decision, y=1 (positive)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="x",
+            linestyle="none",
+            color=color_negative,
+            markersize=6,
+            label="Fallback decision, y=0 (negative)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="x",
+            linestyle="none",
+            color=color_positive,
+            markersize=6,
+            label="Fallback decision, y=1 (positive)",
+        ),
+    ]
 
     for ax, res in zip(axes, results):
         df_mode = res["df"]
         show_fallback = res["mode"] != "fallback_off"
         fallback_mask = df_mode["fallback_used"] if show_fallback else pd.Series(False, index=df_mode.index)
 
-        handles = []
-        labels = []
-
         local_scatter = ax.scatter(
             df_mode.loc[~fallback_mask, "tsne_x"],
             df_mode.loc[~fallback_mask, "tsne_y"],
             s=point_size,
             alpha=0.6,
-            c=df_mode.loc[~fallback_mask, "y_true"],
-            cmap=local_cmap,
-            norm=target_norm,
+            c=_target_colors(df_mode.loc[~fallback_mask, "y_true"]),
         )
-        handles.append(local_scatter)
-        labels.append(f"Local decision (labels {target_min:g}→{target_max:g})")
 
         if show_fallback:
             fallback_scatter = ax.scatter(
@@ -277,16 +313,13 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
                 df_mode.loc[fallback_mask, "tsne_y"],
                 s=point_size * 1.2,
                 alpha=0.7,
-                c=df_mode.loc[fallback_mask, "y_true"],
-                cmap=fallback_cmap,
-                norm=target_norm,
-                label="Fallback decision",
+                c=_target_colors(df_mode.loc[fallback_mask, "y_true"]),
                 marker="x",
             )
-            handles.append(fallback_scatter)
-            labels.append(f"Fallback decision (labels {target_min:g}→{target_max:g})")
 
         dense_region = _find_dense_region(df_mode)
+        handles = list(legend_handles)
+        labels = [handle.get_label() for handle in handles]
         if dense_region:
             rect = Rectangle(
                 (dense_region["xlim"][0], dense_region["ylim"][0]),
@@ -308,9 +341,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
                 df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_y"],
                 s=point_size * 2,
                 alpha=0.75,
-                c=df_mode.loc[~fallback_mask & dense_region["mask"], "y_true"],
-                cmap=local_cmap,
-                norm=target_norm,
+                c=_target_colors(df_mode.loc[~fallback_mask & dense_region["mask"], "y_true"]),
             )
             if show_fallback:
                 inset_ax.scatter(
@@ -318,9 +349,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
                     df_mode.loc[fallback_mask & dense_region["mask"], "tsne_y"],
                     s=point_size * 2.4,
                     alpha=0.85,
-                    c=df_mode.loc[fallback_mask & dense_region["mask"], "y_true"],
-                    cmap=fallback_cmap,
-                    norm=target_norm,
+                    c=_target_colors(df_mode.loc[fallback_mask & dense_region["mask"], "y_true"]),
                     marker="x",
                 )
             inset_ax.set_xlim(*dense_region["xlim"])
