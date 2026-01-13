@@ -199,12 +199,13 @@ def _run_clustering(
 
 
 def run_analysis(
-    csv_path: Path,
-    output_dir: Path,
+    results_dir: Path,
     scaler: str,
     min_bucket_size: int,
     analysis_mode: str,
 ) -> None:
+    csv_path = results_dir / "bucket_metrics_gain.csv"
+    output_dir = results_dir / "analysis_results"
     df = pd.read_csv(csv_path)
     df["is_weak"] = _normalize_bool(df["is_weak"])
 
@@ -350,16 +351,10 @@ def run_analysis(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Hierarchical clustering for bucket metrics.")
     parser.add_argument(
-        "--csv-path",
+        "--results-dir",
         type=Path,
-        default=Path("results/synth_strong_v1/bucket_metrics_gain.csv"),
-        help="Path to bucket_metrics_gain.csv",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("results/hierarchical_bucket_analysis"),
-        help="Output directory for plots and reports",
+        default=Path("results/synth_strong_v1"),
+        help="Results directory containing bucket_metrics_gain.csv",
     )
     parser.add_argument(
         "--scaler",
@@ -382,8 +377,7 @@ def main() -> None:
     args = parser.parse_args()
 
     run_analysis(
-        csv_path=args.csv_path,
-        output_dir=args.output_dir,
+        results_dir=args.results_dir,
         scaler=args.scaler,
         min_bucket_size=args.min_bucket_size,
         analysis_mode=args.analysis_mode,
