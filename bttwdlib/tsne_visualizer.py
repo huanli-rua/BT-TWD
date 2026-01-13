@@ -325,7 +325,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
         handles = list(legend_handles)
         labels = [handle.get_label() for handle in handles]
         if dense_region:
-            inset_ax = inset_axes(ax, width="40%", height="40%", loc="lower right", borderpad=1)
+            inset_ax = inset_axes(ax, width="40%", height="40%", loc="upper left", borderpad=1)
             inset_ax.scatter(
                 df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_x"],
                 df_mode.loc[~fallback_mask & dense_region["mask"], "tsne_y"],
@@ -354,11 +354,11 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             rect, connector1, connector2 = mark_inset(
                 ax,
                 inset_ax,
-                loc1=2,
-                loc2=4,
+                loc1=1,
+                loc2=3,
                 fc="none",
-                ec="orange",
-                lw=1.2,
+                ec="yellow",
+                lw=2.0,
                 linestyle="--",
             )
             rect.set_label("Dense region")
