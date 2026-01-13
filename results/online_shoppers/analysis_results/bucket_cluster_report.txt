@@ -1,0 +1,27 @@
+层次聚类分析报告
+输入文件: ..\results\online_shoppers\bucket_metrics_gain.csv
+选择层级: 2
+弱桶: L1_VisitorType=new|L2_Month=high_season, L1_VisitorType=returning|L2_Month=others
+强桶: L1_VisitorType=new|L2_Month=low_season
+
+弱桶分析:
+  平均簇内距离: 5.2922
+  平均合并高度: 5.4742
+  诊断: 弱桶合并高度更低或簇内距离更大，说明结构更分散。
+
+强桶分析:
+  平均簇内距离: 5.2922
+  平均合并高度: 5.2922
+  诊断: 强桶合并高度更高或簇内距离更小，说明结构更紧凑。
+
+结构约束分析:
+  父桶: L1_VisitorType=new (n_train=204)
+  最小子桶: L1_VisitorType=new|L2_Month=others (n_train=15)
+  min_bucket_size=50
+  解释: 当子桶样本数低于 min_bucket_size 时，父桶不能继续细分。
+
+桶级别合并情况:
+                               bucket_id  is_weak  cluster_label  intra_cluster_avg_distance  merge_height
+ L1_VisitorType=new|L2_Month=high_season     True              0                    5.292248      5.292248
+L1_VisitorType=returning|L2_Month=others     True              1                         NaN      5.656157
+  L1_VisitorType=new|L2_Month=low_season    False              0                    5.292248      5.292248

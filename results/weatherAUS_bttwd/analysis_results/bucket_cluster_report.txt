@@ -1,0 +1,27 @@
+层次聚类分析报告
+输入文件: ..\results\weatherAUS_bttwd\bucket_metrics_gain.csv
+选择层级: 1
+弱桶: L1_Location=BadgerysCreek, L1_Location=Ballarat
+强桶: L1_Location=Launceston
+
+弱桶分析:
+  平均簇内距离: 3.7480
+  平均合并高度: 3.7480
+  诊断: 弱桶合并高度更低或簇内距离更大，说明结构更分散。
+
+强桶分析:
+  平均簇内距离: nan
+  平均合并高度: 6.3208
+  诊断: 强桶合并高度更高或簇内距离更小，说明结构更紧凑。
+
+结构约束分析:
+  父桶: L1_Location=Launceston|L2_RainToday=rain_today_no (n_train=677)
+  最小子桶: L1_Location=Launceston|L2_RainToday=rain_today_no|L3_Humidity3pm=others (n_train=0)
+  min_bucket_size=50
+  解释: 当子桶样本数低于 min_bucket_size 时，父桶不能继续细分。
+
+桶级别合并情况:
+                bucket_id  is_weak  cluster_label  intra_cluster_avg_distance  merge_height
+L1_Location=BadgerysCreek     True              0                    3.747968      3.747968
+     L1_Location=Ballarat     True              0                    3.747968      3.747968
+   L1_Location=Launceston    False              1                         NaN      6.320817

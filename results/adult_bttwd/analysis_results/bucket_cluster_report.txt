@@ -1,0 +1,27 @@
+层次聚类分析报告
+输入文件: ..\results\adult_bttwd\bucket_metrics_gain.csv
+选择层级: 3
+弱桶: L1_age=very_old|L2_education=low|L3_hours-per-week=normal_hours, L1_age=young|L2_education=mid|L3_hours-per-week=high_hours
+强桶: L1_age=young|L2_education=high|L3_hours-per-week=high_hours
+
+弱桶分析:
+  平均簇内距离: 3.1343
+  平均合并高度: 3.1343
+  诊断: 弱桶合并高度更低或簇内距离更大，说明结构更分散。
+
+强桶分析:
+  平均簇内距离: nan
+  平均合并高度: 7.0835
+  诊断: 强桶合并高度更高或簇内距离更小，说明结构更紧凑。
+
+结构约束分析:
+  父桶: L1_age=young (n_train=805)
+  最小子桶: L1_age=young|L2_education=others (n_train=31)
+  min_bucket_size=50
+  解释: 当子桶样本数低于 min_bucket_size 时，父桶不能继续细分。
+
+桶级别合并情况:
+                                                      bucket_id  is_weak  cluster_label  intra_cluster_avg_distance  merge_height
+L1_age=very_old|L2_education=low|L3_hours-per-week=normal_hours     True              0                    3.134307      3.134307
+     L1_age=young|L2_education=mid|L3_hours-per-week=high_hours     True              0                    3.134307      3.134307
+    L1_age=young|L2_education=high|L3_hours-per-week=high_hours    False              1                         NaN      7.083510
