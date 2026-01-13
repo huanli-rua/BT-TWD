@@ -89,31 +89,6 @@ def _select_buckets(df: pd.DataFrame) -> SelectedBuckets:
     )
 
 
-def _select_average_buckets(df: pd.DataFrame) -> SelectedBuckets:
-    if "is_weak" not in df.columns:
-        raise ValueError("Missing required column: is_weak")
-
-    df = df.copy()
-    df["is_weak"] = _normalize_bool(df["is_weak"])
-
-    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-    grouped = df.groupby("is_weak")[numeric_cols].mean().reset_index()
-    if grouped.empty or grouped["is_weak"].nunique() < 2:
-        raise ValueError("Need both weak and strong buckets to compute averages.")
-
-    grouped["bucket_id"] = grouped["is_weak"].map(
-        lambda val: "WEAK_AVG" if val else "STRONG_AVG"
-    )
-    level_label = "AVG"
-    return SelectedBuckets(
-        buckets=grouped,
-        weak_ids=["WEAK_AVG"],
-        strong_id="STRONG_AVG",
-        level=None,
-        level_label=level_label,
-    )
-
-
 def _select_parent_bucket(df: pd.DataFrame, min_bucket_size: int) -> pd.Series | None:
     if "parent_id" not in df.columns:
         return None
@@ -252,7 +227,7 @@ def run_analysis(
             level_label=level_label,
         )
     else:
-        selected = _select_average_buckets(df)
+        selected = _select_buckets(df)
 
     feature_cols = _numeric_features(
         selected.buckets,
@@ -314,19 +289,6 @@ def run_analysis(
         f"弱桶: {', '.join(selected.weak_ids)}",
         f"强桶: {selected.strong_id}",
         "",
-    ]
-
-    if analysis_mode == "weak-strong":
-        report_lines.extend(
-            [
-                "弱桶/强桶平均分析:",
-                "  使用所有弱桶与强桶的数值特征平均值进行聚类。",
-                "",
-            ]
-        )
-
-    report_lines.extend(
-        [
         "弱桶分析:",
         f"  平均簇内距离: {_mean_or_nan(weak_stats['intra_cluster_avg_distance']):.4f}",
         f"  平均合并高度: {_mean_or_nan(weak_stats['merge_height']):.4f}",
@@ -339,7 +301,6 @@ def run_analysis(
         "",
         "结构约束分析:",
     ]
-    )
 
     if parent_bucket is not None and min_child is not None:
         report_lines.extend(
