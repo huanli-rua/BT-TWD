@@ -367,9 +367,13 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             if k not in fold_record:
                 fold_record[k] = v
         per_fold_records.append(fold_record)
+        bucket_levels = getattr(bttwd_model.bucket_tree, "levels_cfg", []) or []
+        if bucket_levels:
+            test_bucket_ids = bttwd_model.bucket_tree.assign_buckets(X_df_test)
+        else:
+            test_bucket_ids = pd.Series(["ROOT"] * len(X_df_test), dtype="string")
         bucket_df = bttwd_model.get_bucket_stats()
         if not bucket_df.empty:
-            test_bucket_ids = bttwd_model.bucket_tree.assign_buckets(X_df_test)
             bucket_meta = bucket_df.set_index("bucket_id").to_dict("index")
             bucket_groups = test_bucket_ids.groupby(test_bucket_ids).groups
             metrics_cfg = deepcopy(cfg.get("METRICS", {}))
@@ -458,27 +462,25 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             bucket_df["fold"] = fold_idx
             bucket_metrics_records.append(bucket_df)
 
-            # 逐样本预测记录：包含桶ID、阈值来源与预测结果，便于对齐排查。
-            threshold_cache = {bid: bttwd_model._get_threshold_with_backoff(bid) for bid in bucket_meta.keys()}
-            for local_idx, bucket_id in enumerate(test_bucket_ids.tolist()):
-                alpha_beta, threshold_source = threshold_cache.get(
-                    bucket_id, ((float("nan"), float("nan")), "ROOT")
-                )
-                global_idx = int(test_idx[local_idx])
-                per_sample_test_records.append(
-                    {
-                        "fold": fold_idx,
-                        "global_index": global_idx,
-                        "bucket_id": bucket_id,
-                        "threshold_source_bucket": threshold_source,
-                        "alpha_used": float(alpha_beta[0]) if alpha_beta else float("nan"),
-                        "beta_used": float(alpha_beta[1]) if alpha_beta else float("nan"),
-                        "y_true": int(y_test[local_idx]),
-                        "y_score": float(y_score[local_idx]),
-                        "y_pred_s3": int(y_pred_s3[local_idx]),
-                        "y_pred_binary": int(y_pred_binary[local_idx]),
-                    }
-                )
+        # 逐样本预测记录：包含桶ID、阈值来源与预测结果，便于对齐排查。
+        threshold_cache = {bid: bttwd_model._get_threshold_with_backoff(bid) for bid in set(test_bucket_ids.tolist())}
+        for local_idx, bucket_id in enumerate(test_bucket_ids.tolist()):
+            alpha_beta, threshold_source = threshold_cache.get(bucket_id, ((float("nan"), float("nan")), "ROOT"))
+            global_idx = int(test_idx[local_idx])
+            per_sample_test_records.append(
+                {
+                    "fold": fold_idx,
+                    "global_index": global_idx,
+                    "bucket_id": bucket_id,
+                    "threshold_source_bucket": threshold_source,
+                    "alpha_used": float(alpha_beta[0]) if alpha_beta else float("nan"),
+                    "beta_used": float(alpha_beta[1]) if alpha_beta else float("nan"),
+                    "y_true": int(y_test[local_idx]),
+                    "y_score": float(y_score[local_idx]),
+                    "y_pred_s3": int(y_pred_s3[local_idx]),
+                    "y_pred_binary": int(y_pred_binary[local_idx]),
+                }
+            )
 
         th_logs = bttwd_model.get_threshold_logs()
         if not th_logs.empty:
