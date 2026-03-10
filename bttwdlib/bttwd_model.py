@@ -1163,7 +1163,8 @@ class BTTWDModel:
             f"{bucket_ids.nunique()} 个叶子桶，其中有效桶 {len(self.bucket_models)} 个（已训练局部模型）"
         )
 
-        self._export_bucket_reports()
+        if self.cfg.get("OUTPUT", {}).get("export_bucket_reports_on_fit", True):
+            self._export_bucket_reports()
 
     def predict_proba(self, X: np.ndarray, X_df_for_bucket: pd.DataFrame) -> np.ndarray:
         bucket_parts = self.bucket_tree.assign_bucket_parts(X_df_for_bucket)
@@ -1309,7 +1310,7 @@ class BTTWDModel:
             return pd.DataFrame()
         return pd.DataFrame(self.threshold_logs)
 
-    def _export_bucket_reports(self) -> None:
+    def _export_bucket_reports(self, fold: int | str | None = None, append_tree: bool = False) -> None:
         if not self.bucket_stats:
             return
 
@@ -1363,7 +1364,19 @@ class BTTWDModel:
             )
 
         structure_df = pd.DataFrame(structure_rows)
-        structure_df.to_csv(self.results_dir / "bucket_tree_structure.csv", index=False)
+        structure_path = self.results_dir / "bucket_tree_structure.csv"
+        if fold is not None:
+            structure_df.insert(0, "fold", fold)
+
+        if append_tree:
+            structure_df.to_csv(
+                structure_path,
+                mode="a",
+                header=not structure_path.exists(),
+                index=False,
+            )
+        else:
+            structure_df.to_csv(structure_path, index=False)
 
         metrics_rows = []
         for bid, stat in self.bucket_stats.items():

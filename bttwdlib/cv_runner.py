@@ -291,6 +291,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
     if not results_dir.is_absolute():
         results_dir = repo_root / results_dir
     os.makedirs(results_dir, exist_ok=True)
+    cfg.setdefault("OUTPUT", {})["export_bucket_reports_on_fit"] = False
 
     split_cfg = cfg.get("DATA", {}).get("split", {})
     val_ratio_override = split_cfg.get("val_ratio")
@@ -315,6 +316,9 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
     per_fold_records = []
     bucket_metrics_records = []
     threshold_log_records = []
+    tree_structure_path = Path(results_dir) / "bucket_tree_structure.csv"
+    if tree_structure_path.exists():
+        tree_structure_path.unlink()
     threshold_costs = (cfg.get("THRESHOLD") or cfg.get("THRESHOLDS", {})).get("costs", {})
     bucket_test_gain_records = []
     per_sample_test_records = []
@@ -427,6 +431,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
                         "Regret": regret_val,
                         "BND_ratio": s3_metrics.get("BND_ratio"),
                         "POS_coverage": s3_metrics.get("POS_Coverage"),
+                        "is_leaf": len(bttwd_model.children_map.get(bucket_id, [])) == 0,
                         "is_weak": meta.get("is_weak", False),
                         "threshold_source_bucket": meta.get("threshold_source_bucket")
                         or meta.get("parent_with_threshold")
@@ -448,7 +453,6 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             test_bucket_df = _summarize_test_buckets(test_bucket_ids, y_test, y_pred_s3, threshold_costs)
             if not test_bucket_df.empty:
                 bttwd_model.update_test_stats(test_bucket_df)
-                bttwd_model._export_bucket_reports()
                 bucket_df = bucket_df.merge(test_bucket_df, on="bucket_id", how="left")
             else:
                 bucket_df["n_test"] = np.nan
@@ -456,6 +460,8 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
                 bucket_df["BND_ratio_test"] = np.nan
                 bucket_df["POS_Coverage_test"] = np.nan
                 bucket_df["regret_test"] = np.nan
+
+            bttwd_model._export_bucket_reports(fold=fold_idx, append_tree=True)
             bucket_df["fold"] = fold_idx
             bucket_metrics_records.append(bucket_df)
 
@@ -554,7 +560,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
         test_bucket_df_final = _summarize_test_buckets(test_bucket_ids_final, y_test, y_pred_final, threshold_costs)
         if not test_bucket_df_final.empty:
             bttwd_final.update_test_stats(test_bucket_df_final)
-            bttwd_final._export_bucket_reports()
+            bttwd_final._export_bucket_reports(fold="test", append_tree=True)
 
     summary_df = pd.DataFrame(summary_rows)
     per_fold_output_df = pd.DataFrame(per_fold_records)
@@ -605,6 +611,7 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             "Regret",
             "BND_ratio",
             "POS_coverage",
+            "is_leaf",
             "is_weak",
             "threshold_source_bucket",
             "threshold_used",
@@ -619,6 +626,10 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             "baseline_bnd_ratio",
             "baseline_pos_coverage",
         ]
+        if "is_leaf" not in bucket_test_df.columns:
+            bucket_test_df["is_leaf"] = False
+        bucket_test_df["is_leaf"] = bucket_test_df["is_leaf"].fillna(False).astype(bool)
+
         existing_cols = [c for c in ordered_cols if c in bucket_test_df.columns]
         remaining_cols = [c for c in bucket_test_df.columns if c not in existing_cols]
         bucket_test_df = bucket_test_df[existing_cols + remaining_cols]
