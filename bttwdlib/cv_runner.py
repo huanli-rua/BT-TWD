@@ -369,7 +369,8 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
         per_fold_records.append(fold_record)
         bucket_df = bttwd_model.get_bucket_stats()
         if not bucket_df.empty:
-            test_bucket_ids = bttwd_model.bucket_tree.assign_buckets(X_df_test)
+            test_bucket_parts = bttwd_model.bucket_tree.assign_bucket_parts(X_df_test)
+            test_bucket_ids = bttwd_model._route_bucket_ids(test_bucket_parts)
             bucket_meta = bucket_df.set_index("bucket_id").to_dict("index")
             bucket_groups = test_bucket_ids.groupby(test_bucket_ids).groups
             metrics_cfg = deepcopy(cfg.get("METRICS", {}))
@@ -548,7 +549,8 @@ def run_kfold_experiments(X, y, X_df_for_bucket, cfg, test_data=None, bucket_tre
             baseline_holdout_results[base_key] = res
             per_fold_records.append(res)
 
-        test_bucket_ids_final = bttwd_final.bucket_tree.assign_buckets(bucket_df_test)
+        test_bucket_parts_final = bttwd_final.bucket_tree.assign_bucket_parts(bucket_df_test)
+        test_bucket_ids_final = bttwd_final._route_bucket_ids(test_bucket_parts_final)
         test_bucket_df_final = _summarize_test_buckets(test_bucket_ids_final, y_test, y_pred_final, threshold_costs)
         if not test_bucket_df_final.empty:
             bttwd_final.update_test_stats(test_bucket_df_final)
