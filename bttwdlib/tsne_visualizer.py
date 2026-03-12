@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import re
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -460,9 +461,10 @@ def visualize_fallback_with_tsne(
     summary_df.to_csv(summary_path, index=False)
 
     # Export figure
-    figure_png_path = output_root / "tsne_backoff_telco.png"
-    figure_pdf_path = output_root / "tsne_backoff_telco.pdf"
     dataset_name = str((cfg.get("DATA") or {}).get("dataset_name", "dataset"))
+    dataset_slug = re.sub(r"[^0-9A-Za-z]+", "_", dataset_name).strip("_").lower() or "dataset"
+    figure_png_path = output_root / f"tsne_backoff_{dataset_slug}.png"
+    figure_pdf_path = output_root / f"tsne_backoff_{dataset_slug}.pdf"
     _plot_tsne_modes(results, figure_png_path, figure_pdf_path, effective_point_size, dataset_name)
 
     # Return result paths
