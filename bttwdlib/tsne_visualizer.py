@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import re
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -239,7 +240,9 @@ def _collect_mode_result(
     }
 
 
-def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_size: float) -> None:
+def _plot_tsne_modes(
+    results: list[dict[str, Any]], png_path: Path, pdf_path: Path, point_size: float, dataset_name: str
+) -> None:
     n_modes = len(results)
     fig, axes = plt.subplots(1, n_modes, figsize=(6 * n_modes, 5), sharex=True, sharey=True)
     if n_modes == 1:
@@ -285,7 +288,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             linestyle="none",
             color=fallback_color_negative,
             markersize=6,
-            label="Fallback decision, y=0 (negative)",
+            label="Backoff decision, y=0 (negative)",
         ),
         Line2D(
             [0],
@@ -294,7 +297,7 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             linestyle="none",
             color=fallback_color_positive,
             markersize=6,
-            label="Fallback decision, y=1 (positive)",
+            label="Backoff decision, y=1 (positive)",
         ),
     ]
 
@@ -365,10 +368,10 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             handles.append(rect)
             labels.append("Dense region")
 
-        mode_title = "Fallback On" if res["mode"] == "fallback_on" else "Fallback Off"
-        ax.set_title(f"{mode_title} (fallback ratio={df_mode['fallback_used'].mean():.1%})")
-        ax.set_xlabel("t-SNE dimension 1")
-        ax.set_ylabel("t-SNE dimension 2")
+        mode_title = "Backoff On" if res["mode"] == "fallback_on" else "Backoff Off"
+        ax.set_title(f"{mode_title} (backoff ratio={df_mode['fallback_used'].mean():.1%})")
+        ax.set_xlabel("t-SNE dimension 1", fontsize=11)
+        ax.set_ylabel("t-SNE dimension 2", fontsize=11)
         ax.legend(
             handles,
             labels,
@@ -380,12 +383,16 @@ def _plot_tsne_modes(results: list[dict[str, Any]], figure_path: Path, point_siz
             handlelength=1.8,
         )
 
-    fig.suptitle("Fallback decisions in t-SNE space", fontsize=14)
+    fig.suptitle(
+        f"Visualization of the threshold backoff mechanism in t-SNE space ({dataset_name})", fontsize=14
+    )
     fig.tight_layout()
-    figure_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(figure_path, dpi=200)
+    png_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
+    fig.savefig(pdf_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    log_info(f"[t-SNE] Comparison figure saved to: {figure_path}")
+    log_info(f"[t-SNE] Comparison figure saved to: {png_path}")
+    log_info(f"[t-SNE] Comparison figure saved to: {pdf_path}")
 
 
 def visualize_fallback_with_tsne(
@@ -454,13 +461,17 @@ def visualize_fallback_with_tsne(
     summary_df.to_csv(summary_path, index=False)
 
     # Export figure
-    figure_path = output_root / "tsne_fallback_compare.png"
-    _plot_tsne_modes(results, figure_path, effective_point_size)
+    dataset_name = str((cfg.get("DATA") or {}).get("dataset_name", "dataset"))
+    dataset_slug = re.sub(r"[^0-9A-Za-z]+", "_", dataset_name).strip("_").lower() or "dataset"
+    figure_png_path = output_root / f"tsne_backoff_{dataset_slug}.png"
+    figure_pdf_path = output_root / f"tsne_backoff_{dataset_slug}.pdf"
+    _plot_tsne_modes(results, figure_png_path, figure_pdf_path, effective_point_size, dataset_name)
 
     # Return result paths
     return {
         "embedding_path": combined_path,
-        "figure_path": figure_path,
+        "figure_path": figure_png_path,
+        "figure_pdf_path": figure_pdf_path,
         "summary_path": summary_path,
         "results": results,
     }
