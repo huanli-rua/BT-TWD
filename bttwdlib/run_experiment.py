@@ -1,6 +1,6 @@
 """通用入口：读取指定配置跑一次分层切分 + BTTWD 训练/评估。
 
-默认使用仓库内的 airlines 延误示例配置，可通过命令行参数替换为任何数据集配置。
+默认使用仓库内的 adult 示例配置，可通过命令行参数替换为任何数据集配置。
 """
 
 import argparse
@@ -27,7 +27,7 @@ from bttwdlib.preprocessing import apply_feature_engineering_with_config  # noqa
 from bttwdlib.utils_logging import log_info  # noqa: E402
 from bttwdlib.utils_seed import set_global_seed  # noqa: E402
 
-DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "airlines_delay.yaml"
+DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "adult_bttwd.yaml"
 
 
 def _build_bucket_feature_df(df_raw, cfg) -> tuple[np.ndarray, np.ndarray, object, object, object]:
@@ -87,7 +87,7 @@ def parse_args():
         default=str(DEFAULT_CONFIG_PATH),
         help=(
             "Path to the YAML configuration file. "
-            "Defaults to the sample airlines delay config shipped with the repo."
+            "Defaults to the sample adult config shipped with the repo."
         ),
     )
     return parser.parse_args()

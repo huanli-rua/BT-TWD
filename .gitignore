@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 实验产物（整体不入库，本地运行再生）
+results/
+outputs/
+figs/
+
+# 论文与本地参考资料
+Elsevier/
+/*.pdf
+/s3wc_paper.txt
+
+# 工具目录
+.mimocode/
+
+# 辅助实验代码（暂不入库）
+bttwdlib/s3wc_adaptive/
+configs/tabm_baseline.yaml
+scripts/run_cost_matrix_robustness.py
+scripts/run_s3wc_adaptive_all_datasets.py
+scripts/run_s3wc_tuned_reproduction.py
+scripts/run_tabm_baseline.py
+scripts/run_weight_sensitivity_analysis.py
+tests/
