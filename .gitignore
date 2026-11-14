@@ -18,6 +18,8 @@ Elsevier/
 
 # 辅助实验代码（暂不入库）
 bttwdlib/s3wc_adaptive/
+bttwdlib/baselines.py
+bttwdlib/baseline_analyzer.py
 configs/tabm_baseline.yaml
 scripts/run_cost_matrix_robustness.py
 scripts/run_s3wc_adaptive_all_datasets.py
@@ -25,3 +27,6 @@ scripts/run_s3wc_tuned_reproduction.py
 scripts/run_tabm_baseline.py
 scripts/run_weight_sensitivity_analysis.py
 tests/
+
+# 主实验 notebook（本地保留，不入库）
+notebooks/

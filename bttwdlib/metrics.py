@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from sklearn import metrics as skm
-from .bucket_rules import get_parent_bucket_id
 from .utils_logging import log_info
 from .threshold_search import compute_regret
 
@@ -80,66 +79,6 @@ def compute_s3_metrics(y_true, y_s3_pred, y_score, cfg_metrics, costs: dict | No
     if costs is not None and (not metrics_to_use or "Regret" in metrics_to_use):
         metrics_dict["Regret"] = compute_regret(y_true, y_s3_pred_arr, costs)
     return metrics_dict
-
-
-def evaluate_baseline_by_buckets(
-    y_true,
-    y_score,
-    bucket_series,
-    alpha,
-    beta,
-    cost_cfg,
-    include_parents: bool = False,
-) -> list[dict]:
-    """使用全局后验与阈值在桶/父桶上评估基线指标。"""
-
-    df = pd.DataFrame({"y_true": y_true, "y_score": y_score, "bucket_id": bucket_series})
-    metrics_cfg = {"use_metrics": ["Precision", "Recall", "F1", "BAC", "AUC", "MCC", "Kappa"]}
-    results = []
-
-    bucket_ids = list(pd.unique(bucket_series))
-    if include_parents:
-        visited = set(bucket_ids)
-        for bid in list(bucket_ids):
-            parent = get_parent_bucket_id(bid)
-            while parent:
-                if parent not in visited:
-                    bucket_ids.append(parent)
-                    visited.add(parent)
-                parent = get_parent_bucket_id(parent)
-
-    for bucket_id in bucket_ids:
-        if include_parents:
-            mask = df["bucket_id"].str.startswith(f"{bucket_id}|") | (df["bucket_id"] == bucket_id)
-            group = df[mask]
-        else:
-            group = df[df["bucket_id"] == bucket_id]
-
-        if group.empty:
-            continue
-
-        y_true_bucket = group["y_true"].to_numpy()
-        y_score_bucket = group["y_score"].to_numpy()
-        y_pred_s3 = np.where(y_score_bucket >= alpha, 1, np.where(y_score_bucket <= beta, 0, -1))
-        y_pred_binary = np.where(y_score_bucket >= alpha, 1, 0)
-
-        binary_metrics = compute_binary_metrics(y_true_bucket, y_pred_binary, y_score_bucket, metrics_cfg, costs=None)
-        s3_metrics = compute_s3_metrics(y_true_bucket, y_pred_s3, y_score_bucket, metrics_cfg, costs=None)
-        regret_val = compute_regret(y_true_bucket, y_pred_s3, cost_cfg)
-
-        bucket_metrics = {
-            "bucket_id": bucket_id,
-            **binary_metrics,
-            "Regret": regret_val,
-            "BND_ratio": s3_metrics.get("BND_ratio"),
-            "POS_Coverage": s3_metrics.get("POS_Coverage"),
-            "n_samples": len(group),
-            "alpha": alpha,
-            "beta": beta,
-        }
-        results.append(bucket_metrics)
-
-    return results
 
 
 def log_metrics(prefix: str, metrics_dict: dict) -> None:

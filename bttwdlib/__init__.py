@@ -3,7 +3,6 @@ from .data_loader import load_adult_raw, load_dataset
 from .preprocessing import prepare_features_and_labels
 from .bucket_rules import BucketTree
 from .bttwd_model import BTTWDModel
-from .baselines import train_eval_logreg, train_eval_random_forest
 from .metrics import compute_binary_metrics, compute_s3_metrics
 from .cv_runner import run_holdout_experiment, run_kfold_experiments
 from .synth_data import (
@@ -25,8 +24,6 @@ __all__ = [
     "prepare_features_and_labels",
     "BucketTree",
     "BTTWDModel",
-    "train_eval_logreg",
-    "train_eval_random_forest",
     "compute_binary_metrics",
     "compute_s3_metrics",
     "run_holdout_experiment",
