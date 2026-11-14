@@ -33,3 +33,7 @@ notebooks/
 
 # 空占位垃圾文件
 data/**/新建*.txt
+
+# 已移除实验的遗留脚本
+data/sample.py
+scripts/generate_synth_dataset.py
