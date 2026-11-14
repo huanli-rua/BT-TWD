@@ -30,3 +30,6 @@ tests/
 
 # 主实验 notebook（本地保留，不入库）
 notebooks/
+
+# 空占位垃圾文件
+data/**/新建*.txt
